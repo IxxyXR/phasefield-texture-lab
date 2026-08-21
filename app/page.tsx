@@ -7,13 +7,15 @@ type Operator = { ratio: number; level: number; angle: number; wave: number; pha
 type Patch = { base: number; algorithm: number; feedback: number; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
 
-const SIZE = 1024;
+const DEFAULT_RESOLUTION = 1024;
+const RESOLUTIONS = [128, 256, 512, 768, 1024, 1280];
+const INTERACTIVE_RESOLUTION = 256;
 const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const COLOR_VALUES = COLORS.map((hex) => Number.parseInt(hex.slice(1), 16));
-const COORDINATES = Float64Array.from({ length: SIZE }, (_, position) => (position / SIZE - 0.5) * TAU);
+const coordinateCache = new Map<number, Float64Array>();
 const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Double", "Square", "Soft clip"];
 
 const ALGORITHMS: Algorithm[] = [
@@ -44,6 +46,14 @@ function sliderToBase(position: number) {
   return MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, position / 100);
 }
 
+function coordinatesFor(size: number) {
+  const cached = coordinateCache.get(size);
+  if (cached) return cached;
+  const coordinates = Float64Array.from({ length: size }, (_, position) => (position / size - 0.5) * TAU);
+  coordinateCache.set(size, coordinates);
+  return coordinates;
+}
+
 function wave(phase: number, shape: number) {
   const s = Math.sin(phase);
   switch (shape) {
@@ -70,15 +80,19 @@ export default function Home() {
   const [playing, setPlaying] = useState(false);
   const [motionPhase, setMotionPhase] = useState(0);
   const [previewShare, setPreviewShare] = useState(56);
+  const [resolution, setResolution] = useState(DEFAULT_RESOLUTION);
+  const [interacting, setInteracting] = useState(false);
+  const renderSize = interacting ? Math.min(INTERACTIVE_RESOLUTION, resolution) : resolution;
 
-  const draw = useCallback(() => {
+  const draw = useCallback((size = renderSize) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = SIZE;
-    canvas.height = SIZE;
+    canvas.width = size;
+    canvas.height = size;
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) return;
-    const image = context.createImageData(SIZE, SIZE);
+    const image = context.createImageData(size, size);
+    const coordinates = coordinatesFor(size);
     const algorithm = ALGORITHMS[patch.algorithm];
     const carrierLevel = algorithm.carriers.reduce((sum, index) => sum + patch.operators[index].level, 0) || 1;
     const operatorState = patch.operators.map((operator) => {
@@ -86,10 +100,10 @@ export default function Home() {
       return { ...operator, cos: Math.cos(angle), sin: Math.sin(angle), phaseOffset: operator.phase * Math.PI / 180 };
     });
 
-    for (let py = 0; py < SIZE; py++) {
-      for (let px = 0; px < SIZE; px++) {
-        const x = COORDINATES[px];
-        const y = COORDINATES[py];
+    for (let py = 0; py < size; py++) {
+      for (let px = 0; px < size; px++) {
+        const x = coordinates[px];
+        const y = coordinates[py];
         const values = [0, 0, 0, 0];
 
         for (let index = 3; index >= 0; index--) {
@@ -110,7 +124,7 @@ export default function Home() {
         const signal = algorithm.carriers.reduce((sum, index) => sum + values[index], 0) / carrierLevel;
         const band = Math.max(0, Math.min(COLORS.length - 1, Math.floor(((signal + 1) / 2) * COLORS.length)));
         const color = COLOR_VALUES[band];
-        const offset = (py * SIZE + px) * 4;
+        const offset = (py * size + px) * 4;
         image.data[offset] = (color >> 16) & 255;
         image.data[offset + 1] = (color >> 8) & 255;
         image.data[offset + 2] = color & 255;
@@ -118,7 +132,7 @@ export default function Home() {
       }
     }
     context.putImageData(image, 0, 0);
-  }, [patch, motionPhase]);
+  }, [patch, motionPhase, renderSize]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(draw);
@@ -135,6 +149,15 @@ export default function Home() {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [playing]);
+  useEffect(() => {
+    const finishInteraction = () => setInteracting(false);
+    window.addEventListener("pointerup", finishInteraction);
+    window.addEventListener("pointercancel", finishInteraction);
+    return () => {
+      window.removeEventListener("pointerup", finishInteraction);
+      window.removeEventListener("pointercancel", finishInteraction);
+    };
+  }, []);
 
   const updateOperator = (index: number, key: keyof Operator, value: number) => {
     setPatch((current) => ({ ...current, operators: current.operators.map((operator, position) => position === index ? { ...operator, [key]: value } : operator) }));
@@ -181,6 +204,7 @@ export default function Home() {
   const download = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    draw(resolution);
     const link = document.createElement("a");
     link.download = `phasefield-algorithm-${patch.algorithm + 1}.png`;
     link.href = canvas.toDataURL("image/png");
@@ -192,7 +216,7 @@ export default function Home() {
       <header><div className="brand"><span /> PHASEFIELD / 4OP</div><p>Four-operator spatial FM synthesizer</p></header>
       <section ref={workspaceRef} className="workspace" style={{ "--preview-share": `${previewShare}%` } as CSSProperties}>
         <div className="visual-panel">
-          <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram} · {SIZE}²</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
+          <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram} · {interacting ? `PREVIEW ${renderSize}² → ${resolution}²` : `${resolution}²`}</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
           <div className="canvas-wrap"><canvas ref={canvasRef} aria-label="Four-operator FM pixel texture" /></div>
           <p className="explanation">Each operator runs across a spatial direction. Arrows route one operator&apos;s output into another operator&apos;s phase—the same role they play in an FM voice.</p>
         </div>
@@ -212,11 +236,18 @@ export default function Home() {
           onPointerCancel={() => { draggingRef.current = false; }}
         ><span /></div>
 
-        <aside className="controls">
+        <aside
+          className="controls"
+          onPointerDown={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(true); }}
+          onKeyDown={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(true); }}
+          onKeyUp={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(false); }}
+          onBlurCapture={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(false); }}
+        >
           <div className="presets">{Object.entries(PRESETS).map(([name, preset]) => <button key={name} onClick={() => setPatch(clonePatch(preset))}>{name}</button>)}</div>
           <section className="global-controls">
             <label><span>Base frequency</span><output>{patch.base.toFixed(3)}</output><input type="range" min="0" max="100" step="0.25" value={baseToSlider(patch.base)} onChange={(event) => setPatch((current) => ({ ...current, base: sliderToBase(Number(event.target.value)) }))} /></label>
             <label><span>OP4 feedback</span><output>{patch.feedback.toFixed(2)}</output><input type="range" min="0" max="6" step="0.1" value={patch.feedback} onChange={(event) => setPatch((current) => ({ ...current, feedback: Number(event.target.value) }))} /></label>
+            <label className="resolution-control"><span>Resolution</span><select value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>{RESOLUTIONS.map((size) => <option key={size} value={size}>{size} × {size}</option>)}</select></label>
           </section>
           <div className="algorithm-grid" aria-label="FM routing algorithm">
             {ALGORITHMS.map((algorithm, index) => <button key={algorithm.diagram} className={patch.algorithm === index ? "selected" : ""} onClick={() => setPatch((current) => ({ ...current, algorithm: index }))}><b>{index + 1}</b><span>{algorithm.diagram}</span></button>)}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 
 type Operator = { ratio: number; level: number; angle: number; wave: number; phase: number };
 type Patch = { base: number; algorithm: number; feedback: number; operators: Operator[] };
@@ -63,9 +64,12 @@ function clonePatch(patch: Patch): Patch {
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const draggingRef = useRef(false);
   const [patch, setPatch] = useState(() => clonePatch(PRESETS.Cascade));
   const [playing, setPlaying] = useState(false);
   const [motionPhase, setMotionPhase] = useState(0);
+  const [previewShare, setPreviewShare] = useState(56);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -136,6 +140,25 @@ export default function Home() {
     setPatch((current) => ({ ...current, operators: current.operators.map((operator, position) => position === index ? { ...operator, [key]: value } : operator) }));
   };
 
+  const resizePreview = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const bounds = workspace.getBoundingClientRect();
+    const mobile = window.matchMedia("(max-width: 850px)").matches;
+    const rawShare = mobile
+      ? (event.clientY - bounds.top) / bounds.height * 100
+      : (event.clientX - bounds.left) / bounds.width * 100;
+    const desktopMaximum = Math.min(75, (bounds.width - 329) / bounds.width * 100);
+    setPreviewShare(Math.max(mobile ? 24 : 28, Math.min(mobile ? 72 : desktopMaximum, rawShare)));
+  };
+
+  const handleSplitterKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+    setPreviewShare((share) => Math.max(24, Math.min(72, share + direction * 2)));
+  };
+
   const randomize = () => {
     const ratios = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7, 9.5, 11, 13, 15.75];
     const algorithmChoices = [0, 0, 1, 2, 2, 3, 4, 5, 6];
@@ -167,12 +190,27 @@ export default function Home() {
   return (
     <main>
       <header><div className="brand"><span /> PHASEFIELD / 4OP</div><p>Four-operator spatial FM synthesizer</p></header>
-      <section className="workspace">
+      <section ref={workspaceRef} className="workspace" style={{ "--preview-share": `${previewShare}%` } as CSSProperties}>
         <div className="visual-panel">
           <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram} · {SIZE}²</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
           <div className="canvas-wrap"><canvas ref={canvasRef} aria-label="Four-operator FM pixel texture" /></div>
           <p className="explanation">Each operator runs across a spatial direction. Arrows route one operator&apos;s output into another operator&apos;s phase—the same role they play in an FM voice.</p>
         </div>
+
+        <div
+          className="splitter"
+          role="separator"
+          aria-label="Resize texture preview"
+          aria-valuemin={24}
+          aria-valuemax={72}
+          aria-valuenow={Math.round(previewShare)}
+          tabIndex={0}
+          onKeyDown={handleSplitterKey}
+          onPointerDown={(event) => { draggingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); resizePreview(event); }}
+          onPointerMove={(event) => { if (draggingRef.current) resizePreview(event); }}
+          onPointerUp={(event) => { draggingRef.current = false; event.currentTarget.releasePointerCapture(event.pointerId); }}
+          onPointerCancel={() => { draggingRef.current = false; }}
+        ><span /></div>
 
         <aside className="controls">
           <div className="presets">{Object.entries(PRESETS).map(([name, preset]) => <button key={name} onClick={() => setPatch(clonePatch(preset))}>{name}</button>)}</div>

@@ -26,6 +26,7 @@ const MAX_BASE = 2;
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const COLOR_VALUES = COLORS.map((hex) => Number.parseInt(hex.slice(1), 16));
 const coordinateCache = new Map<number, Float64Array>();
+const polarCache = new Map<number, { radius?: Float32Array; angle?: Float32Array }>();
 const SPATIAL_NAMES = ["Linear", "Radial", "Angular", "Spiral"];
 const SPATIAL_FORMULAS = [
   "x cos(d) + y sin(d)",
@@ -93,6 +94,29 @@ function coordinatesFor(size: number) {
   return coordinates;
 }
 
+function polarCoordinatesFor(size: number, needsRadius: boolean, needsAngle: boolean) {
+  const coordinates = coordinatesFor(size);
+  const cached = polarCache.get(size) ?? {};
+  const makeRadius = needsRadius && !cached.radius;
+  const makeAngle = needsAngle && !cached.angle;
+  if (!makeRadius && !makeAngle) return cached;
+
+  const radius = makeRadius ? new Float32Array(size * size) : cached.radius;
+  const angle = makeAngle ? new Float32Array(size * size) : cached.angle;
+  for (let py = 0; py < size; py++) {
+    const y = coordinates[py];
+    for (let px = 0; px < size; px++) {
+      const x = coordinates[px];
+      const offset = py * size + px;
+      if (makeRadius) radius![offset] = Math.sqrt(x * x + y * y);
+      if (makeAngle) angle![offset] = Math.atan2(y, x);
+    }
+  }
+  const result = { radius, angle };
+  polarCache.set(size, result);
+  return result;
+}
+
 function wave(phase: number, shape: number) {
   const s = Math.sin(phase);
   switch (shape) {
@@ -152,6 +176,7 @@ function clonePatch(patch: Patch): Patch {
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageCacheRef = useRef(new Map<number, ImageData>());
   const workspaceRef = useRef<HTMLElement>(null);
   const draggingRef = useRef(false);
   const [patch, setPatch] = useState(() => clonePatch(DEFAULT_PATCH));
@@ -165,14 +190,20 @@ export default function Home() {
   const draw = useCallback((size = renderSize) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = size;
-    canvas.height = size;
+    if (canvas.width !== size) canvas.width = size;
+    if (canvas.height !== size) canvas.height = size;
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) return;
-    const image = context.createImageData(size, size);
+    let image = imageCacheRef.current.get(size);
+    if (!image) {
+      image = context.createImageData(size, size);
+      imageCacheRef.current.set(size, image);
+    }
     const coordinates = coordinatesFor(size);
     const algorithm = ALGORITHMS[patch.algorithm];
-    const carrierLevel = algorithm.carriers.reduce((sum, index) => sum + patch.operators[index].level, 0) || 1;
+    let carrierLevel = 0;
+    for (const index of algorithm.carriers) carrierLevel += patch.operators[index].level;
+    carrierLevel ||= 1;
     const operatorState = patch.operators.map((operator) => {
       const angle = operator.angle * Math.PI / 180;
       return {
@@ -186,15 +217,17 @@ export default function Home() {
     });
     const needsRadius = operatorState.some((operator) => operator.space === 1 || operator.space === 3);
     const needsAngle = operatorState.some((operator) => operator.space === 2 || operator.space === 3);
+    const polar = needsRadius || needsAngle ? polarCoordinatesFor(size, needsRadius, needsAngle) : null;
     const maximumRadius = Math.PI * Math.SQRT2;
+    const values = [0, 0, 0, 0];
 
     for (let py = 0; py < size; py++) {
       for (let px = 0; px < size; px++) {
         const x = coordinates[px];
         const y = coordinates[py];
-        const radius = needsRadius ? Math.hypot(x, y) : 0;
-        const polarAngle = needsAngle ? Math.atan2(y, x) : 0;
-        const values = [0, 0, 0, 0];
+        const pixelOffset = py * size + px;
+        const radius = needsRadius ? polar!.radius![pixelOffset] : 0;
+        const polarAngle = needsAngle ? polar!.angle![pixelOffset] : 0;
 
         for (let index = 3; index >= 0; index--) {
           const operator = operatorState[index];
@@ -210,7 +243,9 @@ export default function Home() {
           }
           const spatialPhase = patch.base * operator.ratio * coordinate;
           const basePhase = spatialPhase + operator.phaseOffset + motionPhase * operator.ratio;
-          const modulation = algorithm.inputs[index].reduce((sum, source) => sum + values[source], 0);
+          let modulation = 0;
+          const inputs = algorithm.inputs[index];
+          for (let inputIndex = 0; inputIndex < inputs.length; inputIndex++) modulation += values[inputs[inputIndex]];
 
           if (index === 3 && patch.feedback > 0) {
             let feedbackValue = 0;
@@ -221,10 +256,12 @@ export default function Home() {
           }
         }
 
-        const signal = algorithm.carriers.reduce((sum, index) => sum + values[index], 0) / carrierLevel;
+        let signal = 0;
+        for (let carrierIndex = 0; carrierIndex < algorithm.carriers.length; carrierIndex++) signal += values[algorithm.carriers[carrierIndex]];
+        signal /= carrierLevel;
         const band = Math.max(0, Math.min(COLORS.length - 1, Math.floor(((signal + 1) / 2) * COLORS.length)));
         const color = COLOR_VALUES[band];
-        const offset = (py * size + px) * 4;
+        const offset = pixelOffset * 4;
         image.data[offset] = (color >> 16) & 255;
         image.data[offset + 1] = (color >> 8) & 255;
         image.data[offset + 2] = color & 255;

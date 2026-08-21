@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 
-type Operator = { ratio: number; level: number; angle: number; wave: number; phase: number };
+type Operator = {
+  ratio: number;
+  level: number;
+  angle: number;
+  wave: number;
+  phase: number;
+  space: number;
+  radialBias: number;
+  orientation: number;
+  twist: number;
+};
 type Patch = { base: number; algorithm: number; feedback: number; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
 
@@ -16,6 +26,13 @@ const MAX_BASE = 2;
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const COLOR_VALUES = COLORS.map((hex) => Number.parseInt(hex.slice(1), 16));
 const coordinateCache = new Map<number, Float64Array>();
+const SPATIAL_NAMES = ["Linear", "Radial", "Angular", "Spiral"];
+const SPATIAL_FORMULAS = [
+  "x cos(d) + y sin(d)",
+  "R (r / R)^γ",
+  "atan2(y, x) − orientation",
+  "r + twist · atan2(y, x)",
+];
 const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Triangle", "Square", "Soft clip", "Sawtooth", "25% pulse"];
 const WAVE_FORMULAS = [
   "sin(θ)",
@@ -41,13 +58,23 @@ const ALGORITHMS: Algorithm[] = [
   { diagram: "1 + 2 + 3 + 4", inputs: [[], [], [], []], carriers: [0, 1, 2, 3] },
 ];
 
-const op = (ratio: number, level: number, angle: number, wave = 0, phase = 0): Operator => ({ ratio, level, angle, wave, phase });
+const op = (ratio: number, level: number, angle: number, wave = 0, phase = 0): Operator => ({
+  ratio,
+  level,
+  angle,
+  wave,
+  phase,
+  space: 0,
+  radialBias: 0,
+  orientation: 0,
+  twist: 1.5,
+});
 
-const PRESETS: Record<string, Patch> = {
-  Cascade: { base: 0.46, algorithm: 0, feedback: 0.8, operators: [op(1, 1, 0), op(3, 3.4, 88), op(7, 2.7, 37, 2), op(13, 2.1, 142)] },
-  Alloy: { base: 0.82, algorithm: 2, feedback: 2.6, operators: [op(1.25, 1, 12), op(2.75, 4.2, 92), op(5.5, 3.6, 148, 4), op(11.25, 2.8, 48, 1)] },
-  Lattice: { base: 0.19, algorithm: 5, feedback: 1.2, operators: [op(3, 1, 0), op(5, 0.9, 58), op(9, 0.85, 119), op(15.5, 5.2, 91, 3)] },
-  Split: { base: 1.16, algorithm: 3, feedback: 3.4, operators: [op(0.5, 1, 22, 0), op(4.75, 4.5, 112, 1), op(1.5, 0.9, 158, 4), op(9.25, 3.8, 68, 6)] },
+const DEFAULT_PATCH: Patch = {
+  base: 0.46,
+  algorithm: 0,
+  feedback: 0.8,
+  operators: [op(1, 1, 0), op(3, 3.4, 88), op(7, 2.7, 37, 2), op(13, 2.1, 142)],
 };
 
 function baseToSlider(base: number) {
@@ -127,7 +154,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const draggingRef = useRef(false);
-  const [patch, setPatch] = useState(() => clonePatch(PRESETS.Cascade));
+  const [patch, setPatch] = useState(() => clonePatch(DEFAULT_PATCH));
   const [playing, setPlaying] = useState(false);
   const [motionPhase, setMotionPhase] = useState(0);
   const [previewShare, setPreviewShare] = useState(56);
@@ -148,18 +175,40 @@ export default function Home() {
     const carrierLevel = algorithm.carriers.reduce((sum, index) => sum + patch.operators[index].level, 0) || 1;
     const operatorState = patch.operators.map((operator) => {
       const angle = operator.angle * Math.PI / 180;
-      return { ...operator, cos: Math.cos(angle), sin: Math.sin(angle), phaseOffset: operator.phase * Math.PI / 180 };
+      return {
+        ...operator,
+        cos: Math.cos(angle),
+        sin: Math.sin(angle),
+        phaseOffset: operator.phase * Math.PI / 180,
+        orientationOffset: operator.orientation * Math.PI / 180,
+        radialExponent: Math.pow(2, operator.radialBias * 2),
+      };
     });
+    const needsRadius = operatorState.some((operator) => operator.space === 1 || operator.space === 3);
+    const needsAngle = operatorState.some((operator) => operator.space === 2 || operator.space === 3);
+    const maximumRadius = Math.PI * Math.SQRT2;
 
     for (let py = 0; py < size; py++) {
       for (let px = 0; px < size; px++) {
         const x = coordinates[px];
         const y = coordinates[py];
+        const radius = needsRadius ? Math.hypot(x, y) : 0;
+        const polarAngle = needsAngle ? Math.atan2(y, x) : 0;
         const values = [0, 0, 0, 0];
 
         for (let index = 3; index >= 0; index--) {
           const operator = operatorState[index];
-          const spatialPhase = patch.base * operator.ratio * (x * operator.cos + y * operator.sin);
+          let coordinate: number;
+          if (operator.space === 1) {
+            coordinate = maximumRadius * Math.pow(radius / maximumRadius, operator.radialExponent);
+          } else if (operator.space === 2) {
+            coordinate = polarAngle - operator.orientationOffset;
+          } else if (operator.space === 3) {
+            coordinate = radius + operator.twist * polarAngle;
+          } else {
+            coordinate = x * operator.cos + y * operator.sin;
+          }
+          const spatialPhase = patch.base * operator.ratio * coordinate;
           const basePhase = spatialPhase + operator.phaseOffset + motionPhase * operator.ratio;
           const modulation = algorithm.inputs[index].reduce((sum, source) => sum + values[source], 0);
 
@@ -242,13 +291,20 @@ export default function Home() {
       base: MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, Math.random()),
       algorithm,
       feedback: Math.random() * 4.5,
-      operators: Array.from({ length: 4 }, (_, index) => op(
-        ratios[Math.floor(Math.random() * ratios.length)],
-        ALGORITHMS[algorithm].carriers.includes(index) ? 0.75 + Math.random() * 0.65 : 1.5 + Math.random() * 4.5,
-        Math.floor((directionRoot + index * (38 + Math.random() * 18) + (Math.random() - 0.5) * 16) % 180),
-        Math.floor(Math.random() * WAVE_NAMES.length),
-        Math.floor(Math.random() * 360),
-      )),
+      operators: Array.from({ length: 4 }, (_, index) => {
+        const operator = op(
+          ratios[Math.floor(Math.random() * ratios.length)],
+          ALGORITHMS[algorithm].carriers.includes(index) ? 0.75 + Math.random() * 0.65 : 1.5 + Math.random() * 4.5,
+          Math.floor((directionRoot + index * (38 + Math.random() * 18) + (Math.random() - 0.5) * 16) % 180),
+          Math.floor(Math.random() * WAVE_NAMES.length),
+          Math.floor(Math.random() * 360),
+        );
+        operator.space = Math.floor(Math.random() * SPATIAL_NAMES.length);
+        operator.radialBias = Math.random() * 2 - 1;
+        operator.orientation = Math.floor(Math.random() * 360);
+        operator.twist = Math.random() * 8 - 4;
+        return operator;
+      }),
     });
   };
 
@@ -269,7 +325,7 @@ export default function Home() {
         <div className="visual-panel">
           <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram} · {interacting ? `PREVIEW ${renderSize}² → ${resolution}²` : `${resolution}²`}</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
           <div className="canvas-wrap"><canvas ref={canvasRef} aria-label="Four-operator FM pixel texture" /></div>
-          <p className="explanation">Each operator runs across a spatial direction. Arrows route one operator&apos;s output into another operator&apos;s phase—the same role they play in an FM voice.</p>
+          <p className="explanation">Each operator maps phase through a linear, radial, angular, or spiral field. Arrows route one operator&apos;s output into another operator&apos;s phase—the same role they play in an FM voice.</p>
         </div>
 
         <div
@@ -294,7 +350,6 @@ export default function Home() {
           onKeyUp={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(false); }}
           onBlurCapture={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(false); }}
         >
-          <div className="presets">{Object.entries(PRESETS).map(([name, preset]) => <button key={name} onClick={() => setPatch(clonePatch(preset))}>{name}</button>)}</div>
           <section className="global-controls">
             <label><span>Base frequency</span><output>{patch.base.toFixed(3)}</output><input type="range" min="0" max="100" step="0.25" value={baseToSlider(patch.base)} onChange={(event) => setPatch((current) => ({ ...current, base: sliderToBase(Number(event.target.value)) }))} /></label>
             <label><span>OP4 feedback</span><output>{patch.feedback.toFixed(2)}</output><input type="range" min="0" max="6" step="0.1" value={patch.feedback} onChange={(event) => setPatch((current) => ({ ...current, feedback: Number(event.target.value) }))} /></label>
@@ -308,9 +363,28 @@ export default function Home() {
               <details key={index} open={index === 0}>
                 <summary><b>OP{index + 1}</b><span>{ALGORITHMS[patch.algorithm].carriers.includes(index) ? "CARRIER" : "MODULATOR"}</span><em>{operator.ratio.toFixed(2)}×</em></summary>
                 <div className="operator-body">
+                  <fieldset className="space-picker">
+                    <legend>Spatial phase</legend>
+                    <div className="space-grid">
+                      {SPATIAL_NAMES.map((name, spaceIndex) => (
+                        <button
+                          type="button"
+                          key={name}
+                          className={operator.space === spaceIndex ? "selected" : ""}
+                          aria-pressed={operator.space === spaceIndex}
+                          aria-label={`OP${index + 1} spatial mode ${name}`}
+                          title={SPATIAL_FORMULAS[spaceIndex]}
+                          onClick={() => updateOperator(index, "space", spaceIndex)}
+                        >{name}</button>
+                      ))}
+                    </div>
+                  </fieldset>
                   <label><span>Ratio</span><output>{operator.ratio.toFixed(2)}</output><input type="range" min="0.25" max="16" step="0.25" value={operator.ratio} onChange={(event) => updateOperator(index, "ratio", Number(event.target.value))} /></label>
                   <label><span>Level</span><output>{operator.level.toFixed(1)}</output><input type="range" min="0" max="8" step="0.1" value={operator.level} onChange={(event) => updateOperator(index, "level", Number(event.target.value))} /></label>
-                  <label><span>Direction</span><output>{operator.angle.toFixed(0)}°</output><input type="range" min="0" max="180" step="1" value={operator.angle} onChange={(event) => updateOperator(index, "angle", Number(event.target.value))} /></label>
+                  {operator.space === 0 && <label><span>Direction</span><output>{operator.angle.toFixed(0)}°</output><input type="range" min="0" max="180" step="1" value={operator.angle} onChange={(event) => updateOperator(index, "angle", Number(event.target.value))} /></label>}
+                  {operator.space === 1 && <label><span>Bias</span><output>γ {Math.pow(2, operator.radialBias * 2).toFixed(2)}</output><input type="range" min="-1" max="1" step="0.01" value={operator.radialBias} onChange={(event) => updateOperator(index, "radialBias", Number(event.target.value))} /></label>}
+                  {operator.space === 2 && <label><span>Orientation</span><output>{operator.orientation.toFixed(0)}°</output><input type="range" min="0" max="360" step="1" value={operator.orientation} onChange={(event) => updateOperator(index, "orientation", Number(event.target.value))} /></label>}
+                  {operator.space === 3 && <label><span>Twist</span><output>{operator.twist.toFixed(2)}</output><input type="range" min="-4" max="4" step="0.05" value={operator.twist} onChange={(event) => updateOperator(index, "twist", Number(event.target.value))} /></label>}
                   <label><span>Phase</span><output>{operator.phase.toFixed(0)}°</output><input type="range" min="0" max="360" step="1" value={operator.phase} onChange={(event) => updateOperator(index, "phase", Number(event.target.value))} /></label>
                   <fieldset className="wave-picker">
                     <legend>Waveform · exact function</legend>
@@ -339,7 +413,7 @@ export default function Home() {
           <div className="actions"><button className="primary" onClick={randomize}>Random patch</button><button onClick={() => setPlaying((value) => !value)}>{playing ? "Freeze" : "Animate"}</button><button onClick={download}>Save PNG</button></div>
         </aside>
       </section>
-      <footer><span>4 operators · 8 algorithms · 10 waveforms</span><span>No noise · no spatial warp · phase modulation only</span></footer>
+      <footer><span>4 operators · 8 algorithms · 10 waveforms · 4 spatial modes</span><span>No noise · no spatial warp · phase modulation only</span></footer>
     </main>
   );
 }

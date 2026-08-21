@@ -10,5 +10,10 @@ test("renders the public four-operator FM interface", async () => {
   const html = await response.text();
   assert.match(html, /Phasefield 4OP/);
   assert.match(html, /four-operator FM/i);
+  assert.match(html, /Linear/);
+  assert.match(html, /Radial/);
+  assert.match(html, /Angular/);
+  assert.match(html, /Spiral/);
+  assert.doesNotMatch(html, /Cascade|Alloy|Lattice|Split/);
   assert.doesNotMatch(html, /sign.?in|database|authentication/i);
 });

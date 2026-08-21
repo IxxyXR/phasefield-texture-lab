@@ -8,6 +8,8 @@ type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
 
 const SIZE = 192;
 const TAU = Math.PI * 2;
+const MIN_BASE = 0.03;
+const MAX_BASE = 2;
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Double", "Square", "Soft clip"];
 
@@ -25,11 +27,19 @@ const ALGORITHMS: Algorithm[] = [
 const op = (ratio: number, level: number, angle: number, wave = 0, phase = 0): Operator => ({ ratio, level, angle, wave, phase });
 
 const PRESETS: Record<string, Patch> = {
-  Cascade: { base: 5.5, algorithm: 0, feedback: 0.8, operators: [op(1, 1, 0), op(2, 2.8, 90), op(3, 2.2, 35, 2), op(5, 1.6, 140)] },
-  Alloy: { base: 7, algorithm: 2, feedback: 2.6, operators: [op(1, 1, 12), op(1.41, 3.8, 92), op(3.17, 3.2, 148, 4), op(7.03, 2.4, 48, 1)] },
-  Lattice: { base: 4, algorithm: 5, feedback: 1.2, operators: [op(1, 1, 0), op(1.5, 0.9, 60), op(2, 0.8, 120), op(4, 4.5, 90, 3)] },
-  Split: { base: 8, algorithm: 3, feedback: 3.4, operators: [op(1, 1, 22, 0), op(5, 4, 112, 1), op(0.5, 0.85, 158, 4), op(7, 3.2, 68, 6)] },
+  Cascade: { base: 0.46, algorithm: 0, feedback: 0.8, operators: [op(1, 1, 0), op(3, 3.4, 88), op(7, 2.7, 37, 2), op(13, 2.1, 142)] },
+  Alloy: { base: 0.82, algorithm: 2, feedback: 2.6, operators: [op(1.25, 1, 12), op(2.75, 4.2, 92), op(5.5, 3.6, 148, 4), op(11.25, 2.8, 48, 1)] },
+  Lattice: { base: 0.19, algorithm: 5, feedback: 1.2, operators: [op(3, 1, 0), op(5, 0.9, 58), op(9, 0.85, 119), op(15.5, 5.2, 91, 3)] },
+  Split: { base: 1.16, algorithm: 3, feedback: 3.4, operators: [op(0.5, 1, 22, 0), op(4.75, 4.5, 112, 1), op(1.5, 0.9, 158, 4), op(9.25, 3.8, 68, 6)] },
 };
+
+function baseToSlider(base: number) {
+  return Math.log(base / MIN_BASE) / Math.log(MAX_BASE / MIN_BASE) * 100;
+}
+
+function sliderToBase(position: number) {
+  return MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, position / 100);
+}
 
 function wave(phase: number, shape: number) {
   const s = Math.sin(phase);
@@ -120,15 +130,18 @@ export default function Home() {
   };
 
   const randomize = () => {
-    const ratios = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7, 9.5, 11, 13];
+    const ratios = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7, 9.5, 11, 13, 15.75];
+    const algorithmChoices = [0, 0, 1, 2, 2, 3, 4, 5, 6];
+    const algorithm = algorithmChoices[Math.floor(Math.random() * algorithmChoices.length)];
+    const directionRoot = Math.random() * 180;
     setPatch({
-      base: 3 + Math.random() * 8,
-      algorithm: Math.floor(Math.random() * ALGORITHMS.length),
-      feedback: Math.random() * 4,
+      base: MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, Math.random()),
+      algorithm,
+      feedback: Math.random() * 4.5,
       operators: Array.from({ length: 4 }, (_, index) => op(
         ratios[Math.floor(Math.random() * ratios.length)],
-        index === 0 ? 1 : 0.8 + Math.random() * 4.8,
-        Math.floor(Math.random() * 180),
+        ALGORITHMS[algorithm].carriers.includes(index) ? 0.75 + Math.random() * 0.65 : 1.5 + Math.random() * 4.5,
+        Math.floor((directionRoot + index * (38 + Math.random() * 18) + (Math.random() - 0.5) * 16) % 180),
         Math.floor(Math.random() * WAVE_NAMES.length),
         Math.floor(Math.random() * 360),
       )),
@@ -157,7 +170,7 @@ export default function Home() {
         <aside className="controls">
           <div className="presets">{Object.entries(PRESETS).map(([name, preset]) => <button key={name} onClick={() => setPatch(clonePatch(preset))}>{name}</button>)}</div>
           <section className="global-controls">
-            <label><span>Base frequency</span><output>{patch.base.toFixed(2)}</output><input type="range" min="1" max="16" step="0.25" value={patch.base} onChange={(event) => setPatch((current) => ({ ...current, base: Number(event.target.value) }))} /></label>
+            <label><span>Base frequency</span><output>{patch.base.toFixed(3)}</output><input type="range" min="0" max="100" step="0.25" value={baseToSlider(patch.base)} onChange={(event) => setPatch((current) => ({ ...current, base: sliderToBase(Number(event.target.value)) }))} /></label>
             <label><span>OP4 feedback</span><output>{patch.feedback.toFixed(2)}</output><input type="range" min="0" max="6" step="0.1" value={patch.feedback} onChange={(event) => setPatch((current) => ({ ...current, feedback: Number(event.target.value) }))} /></label>
           </section>
           <div className="algorithm-grid" aria-label="FM routing algorithm">

@@ -182,7 +182,7 @@ export default function Home() {
   }, [patch, motionPhase, renderSize]);
 
   useEffect(() => {
-    const frame = requestAnimationFrame(draw);
+    const frame = requestAnimationFrame(() => draw());
     return () => cancelAnimationFrame(frame);
   }, [draw]);
   useEffect(() => {

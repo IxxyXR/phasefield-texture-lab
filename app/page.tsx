@@ -17,6 +17,16 @@ const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const COLOR_VALUES = COLORS.map((hex) => Number.parseInt(hex.slice(1), 16));
 const coordinateCache = new Map<number, Float64Array>();
 const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Double", "Square", "Soft clip"];
+const WAVE_FORMULAS = [
+  "sin(θ)",
+  "2 max(0, sin θ) − 0.5",
+  "2 |sin θ| − 1",
+  "sin θ |sin θ|",
+  "(sin θ + 0.5 sin 2θ) / 1.5",
+  "sin 2θ",
+  "0.85 sign(sin θ)",
+  "tanh(2.4 sin θ)",
+];
 
 const ALGORITHMS: Algorithm[] = [
   { diagram: "4→3→2→1", inputs: [[1], [2], [3], []], carriers: [0] },
@@ -66,6 +76,43 @@ function wave(phase: number, shape: number) {
     case 7: return Math.tanh(2.4 * s);
     default: return s;
   }
+}
+
+function WaveIcon({ shape }: { shape: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const width = 104;
+    const height = 38;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.scale(scale, scale);
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = "rgba(23, 20, 27, 0.24)";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(0, height / 2);
+    context.lineTo(width, height / 2);
+    context.stroke();
+    context.strokeStyle = "#17141b";
+    context.lineWidth = 1.5;
+    context.beginPath();
+    for (let point = 0; point <= width * 2; point++) {
+      const x = point / 2;
+      const phase = x / width * TAU;
+      const y = height / 2 - wave(phase, shape) * height * 0.27;
+      if (point === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    }
+    context.stroke();
+  }, [shape]);
+
+  return <canvas ref={canvasRef} className="wave-icon" aria-hidden="true" />;
 }
 
 function clonePatch(patch: Patch): Patch {
@@ -261,7 +308,26 @@ export default function Home() {
                   <label><span>Level</span><output>{operator.level.toFixed(1)}</output><input type="range" min="0" max="8" step="0.1" value={operator.level} onChange={(event) => updateOperator(index, "level", Number(event.target.value))} /></label>
                   <label><span>Direction</span><output>{operator.angle.toFixed(0)}°</output><input type="range" min="0" max="180" step="1" value={operator.angle} onChange={(event) => updateOperator(index, "angle", Number(event.target.value))} /></label>
                   <label><span>Phase</span><output>{operator.phase.toFixed(0)}°</output><input type="range" min="0" max="360" step="1" value={operator.phase} onChange={(event) => updateOperator(index, "phase", Number(event.target.value))} /></label>
-                  <label className="wave-select"><span>Waveform</span><select value={operator.wave} onChange={(event) => updateOperator(index, "wave", Number(event.target.value))}>{WAVE_NAMES.map((name, waveIndex) => <option key={name} value={waveIndex}>{waveIndex + 1} · {name}</option>)}</select></label>
+                  <fieldset className="wave-picker">
+                    <legend>Waveform · exact function</legend>
+                    <div className="wave-grid">
+                      {WAVE_NAMES.map((name, waveIndex) => (
+                        <button
+                          type="button"
+                          key={name}
+                          className={operator.wave === waveIndex ? "selected" : ""}
+                          aria-pressed={operator.wave === waveIndex}
+                          aria-label={`${name}: ${WAVE_FORMULAS[waveIndex]}`}
+                          title={WAVE_FORMULAS[waveIndex]}
+                          onClick={() => updateOperator(index, "wave", waveIndex)}
+                        >
+                          <WaveIcon shape={waveIndex} />
+                          <span>{waveIndex + 1} · {name}</span>
+                          <code>{WAVE_FORMULAS[waveIndex]}</code>
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
                 </div>
               </details>
             ))}

@@ -6,11 +6,13 @@ type Operator = { ratio: number; level: number; angle: number; wave: number; pha
 type Patch = { base: number; algorithm: number; feedback: number; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
 
-const SIZE = 192;
+const SIZE = 1024;
 const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
+const COLOR_VALUES = COLORS.map((hex) => Number.parseInt(hex.slice(1), 16));
+const COORDINATES = Float64Array.from({ length: SIZE }, (_, position) => (position / SIZE - 0.5) * TAU);
 const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Double", "Square", "Soft clip"];
 
 const ALGORITHMS: Algorithm[] = [
@@ -75,18 +77,21 @@ export default function Home() {
     const image = context.createImageData(SIZE, SIZE);
     const algorithm = ALGORITHMS[patch.algorithm];
     const carrierLevel = algorithm.carriers.reduce((sum, index) => sum + patch.operators[index].level, 0) || 1;
+    const operatorState = patch.operators.map((operator) => {
+      const angle = operator.angle * Math.PI / 180;
+      return { ...operator, cos: Math.cos(angle), sin: Math.sin(angle), phaseOffset: operator.phase * Math.PI / 180 };
+    });
 
     for (let py = 0; py < SIZE; py++) {
       for (let px = 0; px < SIZE; px++) {
-        const x = (px / SIZE - 0.5) * TAU;
-        const y = (py / SIZE - 0.5) * TAU;
+        const x = COORDINATES[px];
+        const y = COORDINATES[py];
         const values = [0, 0, 0, 0];
 
         for (let index = 3; index >= 0; index--) {
-          const operator = patch.operators[index];
-          const angle = operator.angle * Math.PI / 180;
-          const spatialPhase = patch.base * operator.ratio * (x * Math.cos(angle) + y * Math.sin(angle));
-          const basePhase = spatialPhase + operator.phase * Math.PI / 180 + motionPhase * operator.ratio;
+          const operator = operatorState[index];
+          const spatialPhase = patch.base * operator.ratio * (x * operator.cos + y * operator.sin);
+          const basePhase = spatialPhase + operator.phaseOffset + motionPhase * operator.ratio;
           const modulation = algorithm.inputs[index].reduce((sum, source) => sum + values[source], 0);
 
           if (index === 3 && patch.feedback > 0) {
@@ -100,8 +105,7 @@ export default function Home() {
 
         const signal = algorithm.carriers.reduce((sum, index) => sum + values[index], 0) / carrierLevel;
         const band = Math.max(0, Math.min(COLORS.length - 1, Math.floor(((signal + 1) / 2) * COLORS.length)));
-        const hex = COLORS[band];
-        const color = Number.parseInt(hex.slice(1), 16);
+        const color = COLOR_VALUES[band];
         const offset = (py * SIZE + px) * 4;
         image.data[offset] = (color >> 16) & 255;
         image.data[offset + 1] = (color >> 8) & 255;
@@ -112,7 +116,10 @@ export default function Home() {
     context.putImageData(image, 0, 0);
   }, [patch, motionPhase]);
 
-  useEffect(() => draw(), [draw]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  }, [draw]);
   useEffect(() => {
     if (!playing) return;
     let frame = 0;
@@ -162,7 +169,7 @@ export default function Home() {
       <header><div className="brand"><span /> PHASEFIELD / 4OP</div><p>Four-operator spatial FM synthesizer</p></header>
       <section className="workspace">
         <div className="visual-panel">
-          <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram}</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
+          <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram} · {SIZE}²</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
           <div className="canvas-wrap"><canvas ref={canvasRef} aria-label="Four-operator FM pixel texture" /></div>
           <p className="explanation">Each operator runs across a spatial direction. Arrows route one operator&apos;s output into another operator&apos;s phase—the same role they play in an FM voice.</p>
         </div>

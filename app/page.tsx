@@ -16,7 +16,7 @@ const MAX_BASE = 2;
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const COLOR_VALUES = COLORS.map((hex) => Number.parseInt(hex.slice(1), 16));
 const coordinateCache = new Map<number, Float64Array>();
-const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Triangle", "Square", "Soft clip", "Sawtooth"];
+const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Triangle", "Square", "Soft clip", "Sawtooth", "25% pulse"];
 const WAVE_FORMULAS = [
   "sin(θ)",
   "2 max(0, sin θ) − 0.5",
@@ -27,6 +27,7 @@ const WAVE_FORMULAS = [
   "0.85 sign(sin θ)",
   "tanh(2.4 sin θ)",
   "2 frac(θ / 2π) − 1",
+  "frac(θ / 2π) < 0.25 ? 1 : −1",
 ];
 
 const ALGORITHMS: Algorithm[] = [
@@ -76,6 +77,7 @@ function wave(phase: number, shape: number) {
     case 6: return s >= 0 ? 0.85 : -0.85;
     case 7: return Math.tanh(2.4 * s);
     case 8: return 2 * (phase / TAU - Math.floor(phase / TAU)) - 1;
+    case 9: return phase / TAU - Math.floor(phase / TAU) < 0.25 ? 1 : -1;
     default: return s;
   }
 }
@@ -337,7 +339,7 @@ export default function Home() {
           <div className="actions"><button className="primary" onClick={randomize}>Random patch</button><button onClick={() => setPlaying((value) => !value)}>{playing ? "Freeze" : "Animate"}</button><button onClick={download}>Save PNG</button></div>
         </aside>
       </section>
-      <footer><span>4 operators · 8 algorithms · 9 waveforms</span><span>No noise · no spatial warp · phase modulation only</span></footer>
+      <footer><span>4 operators · 8 algorithms · 10 waveforms</span><span>No noise · no spatial warp · phase modulation only</span></footer>
     </main>
   );
 }

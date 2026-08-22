@@ -20,8 +20,11 @@ type SavedPreset = { name: string; patch: Patch };
 type Palette = { name: string; colors: string[] };
 
 const DEFAULT_RESOLUTION = 1024;
-const RESOLUTIONS = [128, 256, 512, 768, 1024, 1280];
+const RESOLUTIONS = [128, 256, 512, 768, 1024, 1280, 2048, 4096];
 const INTERACTIVE_RESOLUTION = 256;
+const MIN_ANIMATION_FPS = 10;
+const RECOVERY_ANIMATION_FPS = 13;
+const ANIMATION_INTERVAL = 65;
 const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
@@ -237,11 +240,15 @@ export default function Home() {
   const workspaceRef = useRef<HTMLElement>(null);
   const draggingRef = useRef(false);
   const motionPhaseRef = useRef(0);
+  const interactingRef = useRef(false);
+  const adaptiveResolutionRef = useRef(DEFAULT_RESOLUTION);
   const [patch, setPatch] = useState(() => clonePatch(DEFAULT_PATCH));
   const [playing, setPlaying] = useState(false);
   const [previewShare, setPreviewShare] = useState(56);
   const [resolution, setResolution] = useState(DEFAULT_RESOLUTION);
   const [interacting, setInteracting] = useState(false);
+  const [adaptiveResolution, setAdaptiveResolution] = useState(DEFAULT_RESOLUTION);
+  const [animationFps, setAnimationFps] = useState(0);
   const [locks, setLocks] = useState(() => new Set<string>());
   const [openOperators, setOpenOperators] = useState(() => new Set([0, 1, 2, 3]));
   const [presets, setPresets] = useState<SavedPreset[]>([]);
@@ -369,26 +376,84 @@ export default function Home() {
 
   const drawRef = useRef(draw);
   useEffect(() => { drawRef.current = draw; }, [draw]);
+  useEffect(() => { interactingRef.current = interacting; }, [interacting]);
 
   useEffect(() => {
+    if (playing) return;
+    adaptiveResolutionRef.current = resolution;
+    setAdaptiveResolution(resolution);
+    setAnimationFps(0);
     const frame = requestAnimationFrame(() => draw());
     return () => cancelAnimationFrame(frame);
-  }, [draw]);
+  }, [draw, playing, resolution]);
   useEffect(() => {
     if (!playing) return;
+    adaptiveResolutionRef.current = resolution;
+    setAdaptiveResolution(resolution);
+    setAnimationFps(0);
     let frame = 0;
     let last = 0;
+    let lastDrawStartedAt = 0;
+    let lastFpsReport = 0;
+    let fastFrames = 0;
+
+    const changeAdaptiveResolution = (size: number) => {
+      adaptiveResolutionRef.current = size;
+      setAdaptiveResolution(size);
+    };
+
     const tick = (time: number) => {
-      if (time - last > 65) {
+      if (time - last > ANIMATION_INTERVAL) {
         motionPhaseRef.current += 0.035;
-        drawRef.current();
+        const renderResolution = interactingRef.current
+          ? Math.min(INTERACTIVE_RESOLUTION, adaptiveResolutionRef.current)
+          : adaptiveResolutionRef.current;
+        const drawStartedAt = performance.now();
+        drawRef.current(renderResolution);
+        const drawFinishedAt = performance.now();
+        const frameDuration = lastDrawStartedAt
+          ? drawStartedAt - lastDrawStartedAt
+          : drawFinishedAt - drawStartedAt + 16.7;
+        const fps = 1000 / Math.max(1, frameDuration);
+        lastDrawStartedAt = drawStartedAt;
+
+        if (time - lastFpsReport > 400) {
+          setAnimationFps(Math.round(fps));
+          lastFpsReport = time;
+        }
+
+        if (!interactingRef.current) {
+          const currentSize = adaptiveResolutionRef.current;
+          const currentIndex = RESOLUTIONS.indexOf(currentSize);
+          const targetIndex = RESOLUTIONS.indexOf(resolution);
+          if (fps < MIN_ANIMATION_FPS && currentIndex > 0) {
+            const estimatedSize = currentSize * Math.sqrt(Math.max(0.05, fps / MIN_ANIMATION_FPS));
+            let nextIndex = currentIndex - 1;
+            for (let index = currentIndex - 1; index >= 0; index--) {
+              if (RESOLUTIONS[index] <= estimatedSize) {
+                nextIndex = index;
+                break;
+              }
+            }
+            changeAdaptiveResolution(RESOLUTIONS[nextIndex]);
+            fastFrames = 0;
+          } else if (fps >= RECOVERY_ANIMATION_FPS && currentIndex < targetIndex) {
+            fastFrames++;
+            if (fastFrames >= 20) {
+              changeAdaptiveResolution(RESOLUTIONS[currentIndex + 1]);
+              fastFrames = 0;
+            }
+          } else {
+            fastFrames = 0;
+          }
+        }
         last = time;
       }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing]);
+  }, [playing, resolution]);
   useEffect(() => {
     const finishInteraction = () => setInteracting(false);
     window.addEventListener("pointerup", finishInteraction);
@@ -499,12 +564,18 @@ export default function Home() {
     link.click();
   };
 
+  const resolutionStatus = interacting
+    ? `PREVIEW ${renderSize}² → ${resolution}²`
+    : playing
+      ? `${adaptiveResolution < resolution ? `ADAPTIVE ${adaptiveResolution}² → ${resolution}²` : `${resolution}²`} · ${animationFps ? `${animationFps} FPS` : "MEASURING"}`
+      : `${resolution}²`;
+
   return (
     <main>
       <header><div className="brand"><span /> PHASEFIELD / 4OP</div><p>Four-operator spatial FM synthesizer</p></header>
       <section ref={workspaceRef} className="workspace" style={{ "--preview-share": `${previewShare}%` } as CSSProperties}>
         <div className="visual-panel">
-          <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram} · {interacting ? `PREVIEW ${renderSize}² → ${resolution}²` : `${resolution}²`}</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
+          <div className="visual-head"><span>ALGORITHM {patch.algorithm + 1} · {ALGORITHMS[patch.algorithm].diagram} · {resolutionStatus}</span><span className={playing ? "live active" : "live"}>{playing ? "RUNNING" : "STILL"}</span></div>
           <div className="canvas-wrap"><canvas ref={canvasRef} aria-label="Four-operator FM pixel texture" /></div>
           <p className="explanation">Each operator maps phase through a linear, radial, angular, or spiral field. Arrows route one operator&apos;s output into another operator&apos;s phase—the same role they play in an FM voice.</p>
         </div>

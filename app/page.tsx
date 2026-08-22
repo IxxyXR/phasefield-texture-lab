@@ -14,7 +14,7 @@ type Operator = {
   space: number;
   radialBias: number;
   orientation: number;
-  twist: number;
+  turns: number;
 };
 type Patch = { base: number; algorithm: number; feedback: number; animationSpeed: number; palette: number; trueValues: boolean; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
@@ -67,7 +67,7 @@ const SPATIAL_FORMULAS = [
   "x cos(d) + y sin(d)",
   "R (r / R)^γ",
   "mod(atan2(y, x) − start, 2π)",
-  "r + twist · atan2(y, x)",
+  "base · ratio · r + turns · atan2(y, x)",
 ];
 const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Triangle", "Square", "Soft clip", "Sawtooth", "25% pulse"];
 const WAVE_FORMULAS = [
@@ -103,7 +103,7 @@ const op = (ratio: number, level: number, angle: number, wave = 0, phase = 0): O
   space: 0,
   radialBias: 0,
   orientation: 0,
-  twist: 1.5,
+  turns: 2,
 });
 
 const DEFAULT_PATCH: Patch = {
@@ -227,7 +227,7 @@ function isSavedPreset(value: unknown): value is SavedPreset {
   if (typeof preset.patch.base !== "number" || typeof preset.patch.algorithm !== "number" || typeof preset.patch.feedback !== "number" || typeof preset.patch.animationSpeed !== "number") return false;
   if (typeof preset.patch.palette !== "number" || !Number.isInteger(preset.patch.palette) || preset.patch.palette < 0 || preset.patch.palette >= PALETTES.length || typeof preset.patch.trueValues !== "boolean") return false;
   if (!Array.isArray(preset.patch.operators) || preset.patch.operators.length !== 4) return false;
-  const keys: Array<keyof Operator> = ["ratio", "level", "angle", "wave", "phase", "space", "radialBias", "orientation", "twist"];
+  const keys: Array<keyof Operator> = ["ratio", "level", "angle", "wave", "phase", "space", "radialBias", "orientation", "turns"];
   return preset.patch.operators.every((operator) => keys.every((key) => typeof operator?.[key] === "number"));
 }
 
@@ -349,7 +349,7 @@ export default function Home() {
         operator.angle,
         operator.radialBias,
         operator.orientation,
-        operator.twist,
+        operator.turns,
       ].join(":");
       const cached = phaseFieldCacheRef.current[index];
       if (cached?.key === key) return cached.field;
@@ -366,7 +366,8 @@ export default function Home() {
           } else if (operator.space === 2) {
             coordinate = ((polar!.angle![pixelOffset] - operator.orientationOffset) % TAU + TAU) % TAU;
           } else if (operator.space === 3) {
-            coordinate = polar!.radius![pixelOffset] + operator.twist * polar!.angle![pixelOffset];
+            field[pixelOffset] = patch.base * operator.ratio * polar!.radius![pixelOffset] + operator.turns * polar!.angle![pixelOffset];
+            continue;
           } else {
             coordinate = x * operator.cos + y * operator.sin;
           }
@@ -543,7 +544,7 @@ export default function Home() {
         operator.space = Math.floor(Math.random() * SPATIAL_NAMES.length);
         operator.radialBias = Math.random() * 2 - 1;
         operator.orientation = Math.floor(Math.random() * 360);
-        operator.twist = Math.random() * 8 - 4;
+        operator.turns = Math.floor(Math.random() * 25) - 12;
         for (const key of Object.keys(operator) as Array<keyof Operator>) {
           if (locks.has(`operator.${index}.${key}`)) operator[key] = currentOperator[key];
         }
@@ -746,8 +747,8 @@ export default function Home() {
                     <input aria-label={`OP${index + 1} angular start angle`} type="range" min="0" max="360" step="1" value={operator.orientation} onChange={(event) => updateOperator(index, "orientation", Number(event.target.value))} />
                   </div>}
                   {operator.space === 3 && <div className="control">
-                    <div className="control-head"><span>Twist</span><output>{operator.twist.toFixed(2)}</output><LockToggle locked={locks.has(`operator.${index}.twist`)} label={`OP${index + 1} twist`} onToggle={() => toggleLock(`operator.${index}.twist`)} /></div>
-                    <input aria-label={`OP${index + 1} twist`} type="range" min="-4" max="4" step="0.05" value={operator.twist} onChange={(event) => updateOperator(index, "twist", Number(event.target.value))} />
+                    <div className="control-head"><span>Turns</span><output>{operator.turns}</output><LockToggle locked={locks.has(`operator.${index}.turns`)} label={`OP${index + 1} spiral turns`} onToggle={() => toggleLock(`operator.${index}.turns`)} /></div>
+                    <input aria-label={`OP${index + 1} spiral turns`} type="range" min="-12" max="12" step="1" value={operator.turns} onChange={(event) => updateOperator(index, "turns", Number(event.target.value))} />
                   </div>}
                   <div className="control">
                     <div className="control-head"><span>Phase</span><output>{operator.phase.toFixed(0)}°</output><LockToggle locked={locks.has(`operator.${index}.phase`)} label={`OP${index + 1} phase`} onToggle={() => toggleLock(`operator.${index}.phase`)} /></div>

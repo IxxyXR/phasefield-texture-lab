@@ -7,7 +7,7 @@ type ShaderOperator = {
   space: number;
   radialBias: number;
   orientation: number;
-  twist: number;
+  turns: number;
 };
 
 type ShaderFrame = {
@@ -49,7 +49,7 @@ uniform float uAngles[4];
 uniform float uPhases[4];
 uniform float uRadialExponents[4];
 uniform float uOrientations[4];
-uniform float uTwists[4];
+uniform float uTurns[4];
 uniform int uWaves[4];
 uniform int uSpaces[4];
 uniform vec3 uPalette[5];
@@ -88,8 +88,7 @@ float spatialPhase(int index, vec2 point, float radius, float polarAngle) {
       coordinate = mod(polarAngle - uOrientations[index], TAU);
       break;
     case 3:
-      coordinate = radius + uTwists[index] * polarAngle;
-      break;
+      return uBase * uRatios[index] * radius + uTurns[index] * polarAngle;
     default:
       coordinate = point.x * cos(uAngles[index]) + point.y * sin(uAngles[index]);
       break;
@@ -208,7 +207,7 @@ export function createWebGLTextureRenderer(canvas: HTMLCanvasElement): WebGLText
     phases: uniform("uPhases[0]"),
     radialExponents: uniform("uRadialExponents[0]"),
     orientations: uniform("uOrientations[0]"),
-    twists: uniform("uTwists[0]"),
+    turns: uniform("uTurns[0]"),
     waves: uniform("uWaves[0]"),
     spaces: uniform("uSpaces[0]"),
     palette: uniform("uPalette[0]"),
@@ -238,7 +237,7 @@ export function createWebGLTextureRenderer(canvas: HTMLCanvasElement): WebGLText
       gl.uniform1fv(locations.phases, frame.operators.map((operator) => operator.phase * Math.PI / 180));
       gl.uniform1fv(locations.radialExponents, frame.operators.map((operator) => 2 ** (operator.radialBias * 2)));
       gl.uniform1fv(locations.orientations, frame.operators.map((operator) => operator.orientation * Math.PI / 180));
-      gl.uniform1fv(locations.twists, frame.operators.map((operator) => operator.twist));
+      gl.uniform1fv(locations.turns, frame.operators.map((operator) => operator.turns));
       gl.uniform1iv(locations.waves, frame.operators.map((operator) => operator.wave));
       gl.uniform1iv(locations.spaces, frame.operators.map((operator) => operator.space));
       gl.uniform3fv(locations.palette, frame.palette);

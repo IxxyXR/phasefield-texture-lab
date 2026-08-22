@@ -35,7 +35,7 @@ const PALETTES: Palette[] = [
   { name: "Desert", colors: ["#2b1812", "#8f3c2e", "#dd7b32", "#f0bc4f", "#218c84"] },
   { name: "Mineral", colors: ["#25292a", "#53635d", "#8b8577", "#b08f82", "#776578"] },
   { name: "Acid", colors: ["#15100f", "#4e1b62", "#d72f70", "#c9ef30", "#f7f6c5"] },
-  { name: "Noir", colors: ["#070709", "#17141b", "#2c2432", "#c3983f", "#f0eadb"] },
+  { name: "Noir", colors: ["#07080a", "#123b46", "#561d35", "#c39a47", "#d9dde0"] },
 ];
 
 function packHexColor(hex: string) {

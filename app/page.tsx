@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { createWebGLTextureRenderer } from "./webgl-renderer";
 import type { WebGLTextureRenderer } from "./webgl-renderer";
+import { migrateSavedPreset, PRESET_SCHEMA_VERSION } from "./preset-migration.mjs";
 
 type Operator = {
   ratio: number;
@@ -18,7 +19,7 @@ type Operator = {
 };
 type Patch = { base: number; algorithm: number; feedback: number; animationSpeed: number; palette: number; trueValues: boolean; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
-type SavedPreset = { name: string; patch: Patch };
+type SavedPreset = { version: number; name: string; patch: Patch };
 type Palette = { name: string; colors: string[] };
 
 const DEFAULT_RESOLUTION = 1024;
@@ -114,6 +115,18 @@ const DEFAULT_PATCH: Patch = {
   palette: 0,
   trueValues: false,
   operators: [op(1, 1, 0), op(3, 3.4, 88), op(7, 2.7, 37, 2), op(13, 2.1, 142)],
+};
+
+const PRESET_MIGRATION_OPTIONS = {
+  defaultPatch: DEFAULT_PATCH,
+  minimumBase: MIN_BASE,
+  maximumBase: MAX_BASE,
+  minimumAnimationSpeed: MIN_ANIMATION_SPEED,
+  maximumAnimationSpeed: MAX_ANIMATION_SPEED,
+  algorithmCount: ALGORITHMS.length,
+  paletteCount: PALETTES.length,
+  waveCount: WAVE_NAMES.length,
+  spatialModeCount: SPATIAL_NAMES.length,
 };
 
 function baseToSlider(base: number) {
@@ -218,17 +231,6 @@ function WaveIcon({ shape }: { shape: number }) {
 
 function clonePatch(patch: Patch): Patch {
   return { ...patch, operators: patch.operators.map((operator) => ({ ...operator })) };
-}
-
-function isSavedPreset(value: unknown): value is SavedPreset {
-  if (!value || typeof value !== "object") return false;
-  const preset = value as { name?: unknown; patch?: Partial<Patch> };
-  if (typeof preset.name !== "string" || !preset.patch) return false;
-  if (typeof preset.patch.base !== "number" || typeof preset.patch.algorithm !== "number" || typeof preset.patch.feedback !== "number" || typeof preset.patch.animationSpeed !== "number") return false;
-  if (typeof preset.patch.palette !== "number" || !Number.isInteger(preset.patch.palette) || preset.patch.palette < 0 || preset.patch.palette >= PALETTES.length || typeof preset.patch.trueValues !== "boolean") return false;
-  if (!Array.isArray(preset.patch.operators) || preset.patch.operators.length !== 4) return false;
-  const keys: Array<keyof Operator> = ["ratio", "level", "angle", "wave", "phase", "space", "radialBias", "orientation", "turns"];
-  return preset.patch.operators.every((operator) => keys.every((key) => typeof operator?.[key] === "number"));
 }
 
 function LockToggle({ locked, label, onToggle }: { locked: boolean; label: string; onToggle: () => void }) {
@@ -496,7 +498,12 @@ export default function Home() {
   useEffect(() => {
     try {
       const stored = JSON.parse(window.localStorage.getItem(PRESET_STORAGE_KEY) ?? "[]");
-      if (Array.isArray(stored)) setPresets(stored.filter(isSavedPreset));
+      if (Array.isArray(stored)) {
+        const migrated = stored
+          .map((value) => migrateSavedPreset(value, PRESET_MIGRATION_OPTIONS))
+          .filter((preset): preset is SavedPreset => preset !== null);
+        setPresets(migrated);
+      }
     } catch {
       setPresetStatus("Saved presets could not be read");
     }
@@ -566,7 +573,7 @@ export default function Home() {
 
   const savePreset = () => {
     const name = presetName.trim() || `Preset ${presets.length + 1}`;
-    const next = [...presets.filter((preset) => preset.name !== name), { name, patch: clonePatch(patch) }];
+    const next = [...presets.filter((preset) => preset.name !== name), { version: PRESET_SCHEMA_VERSION, name, patch: clonePatch(patch) }];
     try {
       window.localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(next));
     } catch {

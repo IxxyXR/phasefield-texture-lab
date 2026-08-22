@@ -19,6 +19,8 @@ test("renders the public four-operator FM interface", async () => {
   assert.match(html, /Save preset/);
   assert.match(html, /Load preset/);
   assert.equal((html.match(/<details open=""/g) ?? []).length, 4);
+  assert.equal((html.match(/Color palette [A-Z][a-z]+/g) ?? []).length, 8);
+  assert.match(html, /True values continuous grayscale/);
   assert.doesNotMatch(html, /Cascade|Alloy|Lattice|Split/);
   assert.doesNotMatch(html, /sign.?in|database|authentication/i);
 });

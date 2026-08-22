@@ -14,9 +14,10 @@ type Operator = {
   orientation: number;
   twist: number;
 };
-type Patch = { base: number; algorithm: number; feedback: number; operators: Operator[] };
+type Patch = { base: number; algorithm: number; feedback: number; palette: number; trueValues: boolean; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
 type SavedPreset = { name: string; patch: Patch };
+type Palette = { name: string; colors: string[] };
 
 const DEFAULT_RESOLUTION = 1024;
 const RESOLUTIONS = [128, 256, 512, 768, 1024, 1280];
@@ -25,9 +26,19 @@ const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
 const PRESET_STORAGE_KEY = "phasefield-4op-presets";
-const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 4;
-const PACKED_COLORS = COLORS.map((hex) => {
+const PALETTES: Palette[] = [
+  { name: "Ember", colors: ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"] },
+  { name: "Cobalt", colors: ["#07172d", "#164e8a", "#268bd2", "#7ac7ff", "#eef7ff"] },
+  { name: "Moss", colors: ["#101710", "#294f32", "#4f8a4f", "#a3c95f", "#f0f0cf"] },
+  { name: "Violet", colors: ["#130f24", "#3a205c", "#7b3f98", "#cf72c9", "#f8d9f1"] },
+  { name: "Ocean", colors: ["#061a1f", "#0b4f5c", "#168c8c", "#55c6b3", "#e2f4df"] },
+  { name: "Mono", colors: ["#101010", "#414141", "#7a7a7a", "#bdbdbd", "#f3f3f3"] },
+  { name: "Acid", colors: ["#15100f", "#4e1b62", "#d72f70", "#c9ef30", "#f7f6c5"] },
+  { name: "Clay", colors: ["#211713", "#6a382a", "#ad6846", "#d9a066", "#f0dfc2"] },
+];
+
+function packHexColor(hex: string) {
   const color = Number.parseInt(hex.slice(1), 16);
   const red = (color >> 16) & 255;
   const green = (color >> 8) & 255;
@@ -35,7 +46,10 @@ const PACKED_COLORS = COLORS.map((hex) => {
   return LITTLE_ENDIAN
     ? (red | (green << 8) | (blue << 16) | 0xff000000) >>> 0
     : ((red << 24) | (green << 16) | (blue << 8) | 255) >>> 0;
-});
+}
+
+const PACKED_PALETTES = PALETTES.map((palette) => palette.colors.map(packHexColor));
+const CONTINUOUS_GRAYS = Uint32Array.from({ length: 256 }, (_, value) => packHexColor(`#${value.toString(16).padStart(2, "0").repeat(3)}`));
 const coordinateCache = new Map<number, Float64Array>();
 const polarCache = new Map<number, { radius?: Float32Array; angle?: Float32Array }>();
 const SPATIAL_NAMES = ["Linear", "Radial", "Angular", "Spiral"];
@@ -86,6 +100,8 @@ const DEFAULT_PATCH: Patch = {
   base: 0.46,
   algorithm: 0,
   feedback: 0.8,
+  palette: 0,
+  trueValues: false,
   operators: [op(1, 1, 0), op(3, 3.4, 88), op(7, 2.7, 37, 2), op(13, 2.1, 142)],
 };
 
@@ -190,6 +206,7 @@ function isSavedPreset(value: unknown): value is SavedPreset {
   const preset = value as { name?: unknown; patch?: Partial<Patch> };
   if (typeof preset.name !== "string" || !preset.patch) return false;
   if (typeof preset.patch.base !== "number" || typeof preset.patch.algorithm !== "number" || typeof preset.patch.feedback !== "number") return false;
+  if (typeof preset.patch.palette !== "number" || !Number.isInteger(preset.patch.palette) || preset.patch.palette < 0 || preset.patch.palette >= PALETTES.length || typeof preset.patch.trueValues !== "boolean") return false;
   if (!Array.isArray(preset.patch.operators) || preset.patch.operators.length !== 4) return false;
   const keys: Array<keyof Operator> = ["ratio", "level", "angle", "wave", "phase", "space", "radialBias", "orientation", "twist"];
   return preset.patch.operators.every((operator) => keys.every((key) => typeof operator?.[key] === "number"));
@@ -313,6 +330,7 @@ export default function Home() {
     const values = [0, 0, 0, 0];
     const pixels = new Uint32Array(image.data.buffer, image.data.byteOffset, size * size);
     const motionPhase = motionPhaseRef.current;
+    const activeColors = PACKED_PALETTES[patch.palette];
 
     for (let py = 0; py < size; py++) {
       for (let px = 0; px < size; px++) {
@@ -337,8 +355,13 @@ export default function Home() {
         let signal = 0;
         for (let carrierIndex = 0; carrierIndex < algorithm.carriers.length; carrierIndex++) signal += values[algorithm.carriers[carrierIndex]];
         signal /= carrierLevel;
-        const band = Math.max(0, Math.min(COLORS.length - 1, Math.floor(((signal + 1) / 2) * COLORS.length)));
-        pixels[pixelOffset] = PACKED_COLORS[band];
+        const normalized = Math.max(0, Math.min(1, (signal + 1) / 2));
+        if (patch.trueValues) {
+          pixels[pixelOffset] = CONTINUOUS_GRAYS[Math.round(normalized * 255)];
+        } else {
+          const band = Math.min(activeColors.length - 1, Math.floor(normalized * activeColors.length));
+          pixels[pixelOffset] = activeColors[band];
+        }
       }
     }
     context.putImageData(image, 0, 0);
@@ -436,6 +459,8 @@ export default function Home() {
         base: locks.has("base") ? current.base : MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, Math.random()),
         algorithm,
         feedback: locks.has("feedback") ? current.feedback : Math.random() * 4.5,
+        palette: current.palette,
+        trueValues: current.trueValues,
         operators,
       };
     });
@@ -518,6 +543,37 @@ export default function Home() {
             <div className="control resolution-control">
               <div className="control-head"><span>Resolution</span><LockToggle locked={locks.has("resolution")} label="resolution" onToggle={() => toggleLock("resolution")} /></div>
               <select aria-label="Resolution" value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>{RESOLUTIONS.map((size) => <option key={size} value={size}>{size} × {size}</option>)}</select>
+            </div>
+          </section>
+          <section className="color-controls" aria-label="Color mapping">
+            <fieldset className="palette-picker">
+              <legend><span>Color palette</span><LockToggle locked={locks.has("palette")} label="color palette" onToggle={() => toggleLock("palette")} /></legend>
+              <div className="palette-grid">
+                {PALETTES.map((palette, index) => (
+                  <button
+                    type="button"
+                    key={palette.name}
+                    className={!patch.trueValues && patch.palette === index ? "selected" : ""}
+                    aria-pressed={!patch.trueValues && patch.palette === index}
+                    aria-label={`Color palette ${palette.name}`}
+                    onClick={() => setPatch((current) => ({ ...current, palette: index, trueValues: false }))}
+                  >
+                    <span className="palette-swatch" aria-hidden="true">{palette.colors.map((color) => <i key={color} style={{ background: color }} />)}</span>
+                    <b>{palette.name}</b>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <div className="true-values-control">
+              <span><b>True values</b><small>Continuous grayscale · no palette bands</small></span>
+              <button
+                type="button"
+                className={patch.trueValues ? "value-toggle active" : "value-toggle"}
+                aria-pressed={patch.trueValues}
+                aria-label="True values continuous grayscale"
+                onClick={() => setPatch((current) => ({ ...current, trueValues: !current.trueValues }))}
+              >{patch.trueValues ? "On" : "Off"}</button>
+              <LockToggle locked={locks.has("trueValues")} label="true values mode" onToggle={() => toggleLock("trueValues")} />
             </div>
           </section>
           <section className="preset-controls" aria-label="Saved presets">
@@ -625,7 +681,7 @@ export default function Home() {
           <div className="actions"><button className="primary" onClick={randomize}>Random patch</button><button onClick={() => setPlaying((value) => !value)}>{playing ? "Freeze" : "Animate"}</button><button onClick={download}>Save PNG</button></div>
         </aside>
       </section>
-      <footer><span>4 operators · 8 algorithms · 10 waveforms · 4 spatial modes</span><span>No noise · no spatial warp · phase modulation only</span></footer>
+      <footer><span>4 operators · 8 algorithms · 10 waveforms · 4 spatial modes · 8 palettes</span><span>No noise · no spatial warp · phase modulation only</span></footer>
     </main>
   );
 }

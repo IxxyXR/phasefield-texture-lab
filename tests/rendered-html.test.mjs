@@ -13,6 +13,7 @@ test("renders the public four-operator FM interface", async () => {
   assert.match(html, /Linear/);
   assert.match(html, /Radial/);
   assert.match(html, /Angular/);
+  assert.match(html, /mod\(atan2\(y, x\) − start, 2π\)/);
   assert.match(html, /Spiral/);
   assert.match(html, /Lock base frequency during randomize/);
   assert.match(html, /Lock animation speed during randomize/);

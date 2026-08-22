@@ -67,7 +67,7 @@ const SPATIAL_NAMES = ["Linear", "Radial", "Angular", "Spiral"];
 const SPATIAL_FORMULAS = [
   "x cos(d) + y sin(d)",
   "R (r / R)^γ",
-  "atan2(y, x) − orientation",
+  "mod(atan2(y, x) − start, 2π)",
   "r + twist · atan2(y, x)",
 ];
 const WAVE_NAMES = ["Sine", "Half +", "Absolute", "Fold", "Odd pair", "Triangle", "Square", "Soft clip", "Sawtooth", "25% pulse"];
@@ -369,7 +369,7 @@ export default function Home() {
           if (operator.space === 1) {
             coordinate = maximumRadius * Math.pow(polar!.radius![pixelOffset] / maximumRadius, operator.radialExponent);
           } else if (operator.space === 2) {
-            coordinate = polar!.angle![pixelOffset] - operator.orientationOffset;
+            coordinate = ((polar!.angle![pixelOffset] - operator.orientationOffset) % TAU + TAU) % TAU;
           } else if (operator.space === 3) {
             coordinate = polar!.radius![pixelOffset] + operator.twist * polar!.angle![pixelOffset];
           } else {
@@ -769,8 +769,8 @@ export default function Home() {
                     <input aria-label={`OP${index + 1} radial bias`} type="range" min="-1" max="1" step="0.01" value={operator.radialBias} onChange={(event) => updateOperator(index, "radialBias", Number(event.target.value))} />
                   </div>}
                   {operator.space === 2 && <div className="control">
-                    <div className="control-head"><span>Orientation</span><output>{operator.orientation.toFixed(0)}°</output><LockToggle locked={locks.has(`operator.${index}.orientation`)} label={`OP${index + 1} orientation`} onToggle={() => toggleLock(`operator.${index}.orientation`)} /></div>
-                    <input aria-label={`OP${index + 1} orientation`} type="range" min="0" max="360" step="1" value={operator.orientation} onChange={(event) => updateOperator(index, "orientation", Number(event.target.value))} />
+                    <div className="control-head"><span>Start angle</span><output>{operator.orientation.toFixed(0)}°</output><LockToggle locked={locks.has(`operator.${index}.orientation`)} label={`OP${index + 1} angular start angle`} onToggle={() => toggleLock(`operator.${index}.orientation`)} /></div>
+                    <input aria-label={`OP${index + 1} angular start angle`} type="range" min="0" max="360" step="1" value={operator.orientation} onChange={(event) => updateOperator(index, "orientation", Number(event.target.value))} />
                   </div>}
                   {operator.space === 3 && <div className="control">
                     <div className="control-head"><span>Twist</span><output>{operator.twist.toFixed(2)}</output><LockToggle locked={locks.has(`operator.${index}.twist`)} label={`OP${index + 1} twist`} onToggle={() => toggleLock(`operator.${index}.twist`)} /></div>

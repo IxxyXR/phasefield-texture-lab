@@ -85,7 +85,7 @@ float spatialPhase(int index, vec2 point, float radius, float polarAngle) {
       coordinate = MAX_RADIUS * pow(radius / MAX_RADIUS, uRadialExponents[index]);
       break;
     case 2:
-      coordinate = polarAngle - uOrientations[index];
+      coordinate = mod(polarAngle - uOrientations[index], TAU);
       break;
     case 3:
       coordinate = radius + uTwists[index] * polarAngle;

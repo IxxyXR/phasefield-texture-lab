@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { createWebGLTextureRenderer } from "./webgl-renderer";
+import type { WebGLTextureRenderer } from "./webgl-renderer";
 
 type Operator = {
   ratio: number;
@@ -24,7 +26,7 @@ const RESOLUTIONS = [128, 256, 512, 768, 1024, 1280, 2048, 4096];
 const INTERACTIVE_RESOLUTION = 256;
 const MIN_ANIMATION_FPS = 10;
 const RECOVERY_ANIMATION_FPS = 13;
-const ANIMATION_INTERVAL = 65;
+const ANIMATION_INTERVAL = 16;
 const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
@@ -52,6 +54,10 @@ function packHexColor(hex: string) {
 }
 
 const PACKED_PALETTES = PALETTES.map((palette) => palette.colors.map(packHexColor));
+const SHADER_PALETTES = PALETTES.map((palette) => palette.colors.flatMap((hex) => {
+  const color = Number.parseInt(hex.slice(1), 16);
+  return [((color >> 16) & 255) / 255, ((color >> 8) & 255) / 255, (color & 255) / 255];
+}));
 const CONTINUOUS_GRAYS = Uint32Array.from({ length: 256 }, (_, value) => packHexColor(`#${value.toString(16).padStart(2, "0").repeat(3)}`));
 const coordinateCache = new Map<number, Float64Array>();
 const polarCache = new Map<number, { radius?: Float32Array; angle?: Float32Array }>();
@@ -235,6 +241,7 @@ function LockToggle({ locked, label, onToggle }: { locked: boolean; label: strin
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const webglRendererRef = useRef<WebGLTextureRenderer | null | undefined>(undefined);
   const imageCacheRef = useRef(new Map<number, ImageData>());
   const phaseFieldCacheRef = useRef<Array<{ key: string; field: Float64Array } | undefined>>([]);
   const workspaceRef = useRef<HTMLElement>(null);
@@ -269,6 +276,39 @@ export default function Home() {
   const draw = useCallback((size = renderSize) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (webglRendererRef.current === undefined) {
+      try {
+        webglRendererRef.current = createWebGLTextureRenderer(canvas);
+        canvas.dataset.renderer = webglRendererRef.current ? "webgl2" : "cpu";
+      } catch (error) {
+        console.error("[PHASEFIELD_WEBGL] Shader initialization failed; using the CPU renderer.", error);
+        webglRendererRef.current = null;
+        canvas.dataset.renderer = "cpu";
+      }
+    }
+    const algorithm = ALGORITHMS[patch.algorithm];
+    let carrierLevel = 0;
+    let carrierMask = 0;
+    for (const index of algorithm.carriers) {
+      carrierLevel += patch.operators[index].level;
+      carrierMask |= 1 << index;
+    }
+    carrierLevel ||= 1;
+    if (webglRendererRef.current) {
+      webglRendererRef.current.render({
+        size,
+        base: patch.base,
+        feedback: patch.feedback,
+        trueValues: patch.trueValues,
+        motionPhase: motionPhaseRef.current,
+        operators: patch.operators,
+        inputMasks: algorithm.inputs.map((inputs) => inputs.reduce((mask, index) => mask | (1 << index), 0)),
+        carrierMask,
+        carrierLevel,
+        palette: SHADER_PALETTES[patch.palette],
+      });
+      return;
+    }
     if (canvas.width !== size) canvas.width = size;
     if (canvas.height !== size) canvas.height = size;
     const context = canvas.getContext("2d", { alpha: false });
@@ -279,10 +319,6 @@ export default function Home() {
       imageCacheRef.current.set(size, image);
     }
     const coordinates = coordinatesFor(size);
-    const algorithm = ALGORITHMS[patch.algorithm];
-    let carrierLevel = 0;
-    for (const index of algorithm.carriers) carrierLevel += patch.operators[index].level;
-    carrierLevel ||= 1;
     const operatorState = patch.operators.map((operator) => {
       const angle = operator.angle * Math.PI / 180;
       return {
@@ -404,7 +440,8 @@ export default function Home() {
 
     const tick = (time: number) => {
       if (time - last > ANIMATION_INTERVAL) {
-        motionPhaseRef.current += 0.035;
+        const animationElapsed = last ? Math.min(100, time - last) : ANIMATION_INTERVAL;
+        motionPhaseRef.current += animationElapsed * (0.035 / 65);
         const renderResolution = interactingRef.current
           ? Math.min(INTERACTIVE_RESOLUTION, adaptiveResolutionRef.current)
           : adaptiveResolutionRef.current;

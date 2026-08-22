@@ -23,7 +23,6 @@ type Palette = { name: string; colors: string[] };
 
 const DEFAULT_RESOLUTION = 1024;
 const RESOLUTIONS = [128, 256, 512, 768, 1024, 1280, 2048, 4096];
-const INTERACTIVE_RESOLUTION = 256;
 const MIN_ANIMATION_FPS = 10;
 const RECOVERY_ANIMATION_FPS = 13;
 const ANIMATION_INTERVAL = 16;
@@ -258,13 +257,11 @@ export default function Home() {
   const workspaceRef = useRef<HTMLElement>(null);
   const draggingRef = useRef(false);
   const motionPhaseRef = useRef(0);
-  const interactingRef = useRef(false);
   const adaptiveResolutionRef = useRef(DEFAULT_RESOLUTION);
   const [patch, setPatch] = useState(() => clonePatch(DEFAULT_PATCH));
   const [playing, setPlaying] = useState(false);
   const [previewShare, setPreviewShare] = useState(56);
   const [resolution, setResolution] = useState(DEFAULT_RESOLUTION);
-  const [interacting, setInteracting] = useState(false);
   const [adaptiveResolution, setAdaptiveResolution] = useState(DEFAULT_RESOLUTION);
   const [animationFps, setAnimationFps] = useState(0);
   const [locks, setLocks] = useState(() => new Set<string>());
@@ -273,8 +270,6 @@ export default function Home() {
   const [presetName, setPresetName] = useState("");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presetStatus, setPresetStatus] = useState("");
-  const renderSize = interacting ? Math.min(INTERACTIVE_RESOLUTION, resolution) : resolution;
-
   const toggleLock = (id: string) => {
     setLocks((current) => {
       const next = new Set(current);
@@ -284,7 +279,7 @@ export default function Home() {
     });
   };
 
-  const draw = useCallback((size = renderSize) => {
+  const draw = useCallback((size = resolution) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     if (webglRendererRef.current === undefined) {
@@ -419,11 +414,10 @@ export default function Home() {
       }
     }
     context.putImageData(image, 0, 0);
-  }, [patch, renderSize]);
+  }, [patch, resolution]);
 
   const drawRef = useRef(draw);
   useEffect(() => { drawRef.current = draw; }, [draw]);
-  useEffect(() => { interactingRef.current = interacting; }, [interacting]);
 
   useEffect(() => {
     if (playing) return;
@@ -453,9 +447,7 @@ export default function Home() {
       if (time - last > ANIMATION_INTERVAL) {
         const animationElapsed = last ? Math.min(100, time - last) : ANIMATION_INTERVAL;
         motionPhaseRef.current += animationElapsed * (0.035 / 65) * patch.animationSpeed;
-        const renderResolution = interactingRef.current
-          ? Math.min(INTERACTIVE_RESOLUTION, adaptiveResolutionRef.current)
-          : adaptiveResolutionRef.current;
+        const renderResolution = adaptiveResolutionRef.current;
         const drawStartedAt = performance.now();
         drawRef.current(renderResolution);
         const drawFinishedAt = performance.now();
@@ -470,30 +462,28 @@ export default function Home() {
           lastFpsReport = time;
         }
 
-        if (!interactingRef.current) {
-          const currentSize = adaptiveResolutionRef.current;
-          const currentIndex = RESOLUTIONS.indexOf(currentSize);
-          const targetIndex = RESOLUTIONS.indexOf(resolution);
-          if (fps < MIN_ANIMATION_FPS && currentIndex > 0) {
-            const estimatedSize = currentSize * Math.sqrt(Math.max(0.05, fps / MIN_ANIMATION_FPS));
-            let nextIndex = currentIndex - 1;
-            for (let index = currentIndex - 1; index >= 0; index--) {
-              if (RESOLUTIONS[index] <= estimatedSize) {
-                nextIndex = index;
-                break;
-              }
+        const currentSize = adaptiveResolutionRef.current;
+        const currentIndex = RESOLUTIONS.indexOf(currentSize);
+        const targetIndex = RESOLUTIONS.indexOf(resolution);
+        if (fps < MIN_ANIMATION_FPS && currentIndex > 0) {
+          const estimatedSize = currentSize * Math.sqrt(Math.max(0.05, fps / MIN_ANIMATION_FPS));
+          let nextIndex = currentIndex - 1;
+          for (let index = currentIndex - 1; index >= 0; index--) {
+            if (RESOLUTIONS[index] <= estimatedSize) {
+              nextIndex = index;
+              break;
             }
-            changeAdaptiveResolution(RESOLUTIONS[nextIndex]);
-            fastFrames = 0;
-          } else if (fps >= RECOVERY_ANIMATION_FPS && currentIndex < targetIndex) {
-            fastFrames++;
-            if (fastFrames >= 20) {
-              changeAdaptiveResolution(RESOLUTIONS[currentIndex + 1]);
-              fastFrames = 0;
-            }
-          } else {
+          }
+          changeAdaptiveResolution(RESOLUTIONS[nextIndex]);
+          fastFrames = 0;
+        } else if (fps >= RECOVERY_ANIMATION_FPS && currentIndex < targetIndex) {
+          fastFrames++;
+          if (fastFrames >= 20) {
+            changeAdaptiveResolution(RESOLUTIONS[currentIndex + 1]);
             fastFrames = 0;
           }
+        } else {
+          fastFrames = 0;
         }
         last = time;
       }
@@ -502,15 +492,6 @@ export default function Home() {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [playing, resolution, patch.animationSpeed]);
-  useEffect(() => {
-    const finishInteraction = () => setInteracting(false);
-    window.addEventListener("pointerup", finishInteraction);
-    window.addEventListener("pointercancel", finishInteraction);
-    return () => {
-      window.removeEventListener("pointerup", finishInteraction);
-      window.removeEventListener("pointercancel", finishInteraction);
-    };
-  }, []);
   useEffect(() => {
     try {
       const stored = JSON.parse(window.localStorage.getItem(PRESET_STORAGE_KEY) ?? "[]");
@@ -615,11 +596,9 @@ export default function Home() {
     link.click();
   };
 
-  const resolutionStatus = interacting
-    ? `PREVIEW ${renderSize}² → ${resolution}²`
-    : playing
-      ? `${adaptiveResolution < resolution ? `ADAPTIVE ${adaptiveResolution}² → ${resolution}²` : `${resolution}²`} · ${animationFps ? `${animationFps} FPS` : "MEASURING"}`
-      : `${resolution}²`;
+  const resolutionStatus = playing
+    ? `${adaptiveResolution < resolution ? `ADAPTIVE ${adaptiveResolution}² → ${resolution}²` : `${resolution}²`} · ${animationFps ? `${animationFps} FPS` : "MEASURING"}`
+    : `${resolution}²`;
 
   return (
     <main>
@@ -646,13 +625,7 @@ export default function Home() {
           onPointerCancel={() => { draggingRef.current = false; }}
         ><span /></div>
 
-        <aside
-          className="controls"
-          onPointerDown={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(true); }}
-          onKeyDown={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(true); }}
-          onKeyUp={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(false); }}
-          onBlurCapture={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(false); }}
-        >
+        <aside className="controls">
           <section className="global-controls">
             <div className="control">
               <div className="control-head"><span>Base frequency</span><output>{patch.base.toFixed(3)}</output><LockToggle locked={locks.has("base")} label="base frequency" onToggle={() => toggleLock("base")} /></div>

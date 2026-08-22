@@ -16,6 +16,9 @@ test("renders the public four-operator FM interface", async () => {
   assert.match(html, /Spiral/);
   assert.match(html, /Lock base frequency during randomize/);
   assert.match(html, /Lock OP1 waveform during randomize/);
+  assert.match(html, /Save preset/);
+  assert.match(html, /Load preset/);
+  assert.equal((html.match(/<details open=""/g) ?? []).length, 4);
   assert.doesNotMatch(html, /Cascade|Alloy|Lattice|Split/);
   assert.doesNotMatch(html, /sign.?in|database|authentication/i);
 });

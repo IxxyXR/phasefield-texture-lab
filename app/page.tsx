@@ -16,6 +16,7 @@ type Operator = {
 };
 type Patch = { base: number; algorithm: number; feedback: number; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
+type SavedPreset = { name: string; patch: Patch };
 
 const DEFAULT_RESOLUTION = 1024;
 const RESOLUTIONS = [128, 256, 512, 768, 1024, 1280];
@@ -23,6 +24,7 @@ const INTERACTIVE_RESOLUTION = 256;
 const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
+const PRESET_STORAGE_KEY = "phasefield-4op-presets";
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 4;
 const PACKED_COLORS = COLORS.map((hex) => {
@@ -183,6 +185,16 @@ function clonePatch(patch: Patch): Patch {
   return { ...patch, operators: patch.operators.map((operator) => ({ ...operator })) };
 }
 
+function isSavedPreset(value: unknown): value is SavedPreset {
+  if (!value || typeof value !== "object") return false;
+  const preset = value as { name?: unknown; patch?: Partial<Patch> };
+  if (typeof preset.name !== "string" || !preset.patch) return false;
+  if (typeof preset.patch.base !== "number" || typeof preset.patch.algorithm !== "number" || typeof preset.patch.feedback !== "number") return false;
+  if (!Array.isArray(preset.patch.operators) || preset.patch.operators.length !== 4) return false;
+  const keys: Array<keyof Operator> = ["ratio", "level", "angle", "wave", "phase", "space", "radialBias", "orientation", "twist"];
+  return preset.patch.operators.every((operator) => keys.every((key) => typeof operator?.[key] === "number"));
+}
+
 function LockToggle({ locked, label, onToggle }: { locked: boolean; label: string; onToggle: () => void }) {
   return (
     <button
@@ -214,6 +226,11 @@ export default function Home() {
   const [resolution, setResolution] = useState(DEFAULT_RESOLUTION);
   const [interacting, setInteracting] = useState(false);
   const [locks, setLocks] = useState(() => new Set<string>());
+  const [openOperators, setOpenOperators] = useState(() => new Set([0, 1, 2, 3]));
+  const [presets, setPresets] = useState<SavedPreset[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState("");
+  const [presetStatus, setPresetStatus] = useState("");
   const renderSize = interacting ? Math.min(INTERACTIVE_RESOLUTION, resolution) : resolution;
 
   const toggleLock = (id: string) => {
@@ -358,6 +375,14 @@ export default function Home() {
       window.removeEventListener("pointercancel", finishInteraction);
     };
   }, []);
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(PRESET_STORAGE_KEY) ?? "[]");
+      if (Array.isArray(stored)) setPresets(stored.filter(isSavedPreset));
+    } catch {
+      setPresetStatus("Saved presets could not be read");
+    }
+  }, []);
 
   const updateOperator = (index: number, key: keyof Operator, value: number) => {
     setPatch((current) => ({ ...current, operators: current.operators.map((operator, position) => position === index ? { ...operator, [key]: value } : operator) }));
@@ -416,6 +441,29 @@ export default function Home() {
     });
   };
 
+  const savePreset = () => {
+    const name = presetName.trim() || `Preset ${presets.length + 1}`;
+    const next = [...presets.filter((preset) => preset.name !== name), { name, patch: clonePatch(patch) }];
+    try {
+      window.localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      setPresetStatus("Preset could not be saved");
+      return;
+    }
+    setPresets(next);
+    setPresetName(name);
+    setSelectedPreset(name);
+    setPresetStatus(`Saved ${name}`);
+  };
+
+  const loadPreset = () => {
+    const preset = presets.find((candidate) => candidate.name === selectedPreset);
+    if (!preset) return;
+    setPatch(clonePatch(preset.patch));
+    setPresetName(preset.name);
+    setPresetStatus(`Loaded ${preset.name}`);
+  };
+
   const download = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -472,6 +520,16 @@ export default function Home() {
               <select aria-label="Resolution" value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>{RESOLUTIONS.map((size) => <option key={size} value={size}>{size} × {size}</option>)}</select>
             </div>
           </section>
+          <section className="preset-controls" aria-label="Saved presets">
+            <input aria-label="Preset name" type="text" value={presetName} placeholder="Preset name" maxLength={48} onChange={(event) => setPresetName(event.target.value)} />
+            <button type="button" onClick={savePreset}>Save preset</button>
+            <select aria-label="Saved preset" value={selectedPreset} onChange={(event) => { setSelectedPreset(event.target.value); setPresetStatus(""); }}>
+              <option value="">{presets.length ? "Choose preset" : "No saved presets"}</option>
+              {presets.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
+            </select>
+            <button type="button" disabled={!selectedPreset} onClick={loadPreset}>Load preset</button>
+            <span className="preset-status" role="status">{presetStatus}</span>
+          </section>
           <div className="algorithm-control">
             <div className="control-group-head"><span>FM routing algorithm</span><LockToggle locked={locks.has("algorithm")} label="FM routing algorithm" onToggle={() => toggleLock("algorithm")} /></div>
             <div className="algorithm-grid" aria-label="FM routing algorithm">
@@ -480,7 +538,20 @@ export default function Home() {
           </div>
           <div className="operators">
             {patch.operators.map((operator, index) => (
-              <details key={index} open={index === 0}>
+              <details
+                key={index}
+                open={openOperators.has(index)}
+                onToggle={(event) => {
+                  const isOpen = event.currentTarget.open;
+                  setOpenOperators((current) => {
+                    if (current.has(index) === isOpen) return current;
+                    const next = new Set(current);
+                    if (isOpen) next.add(index);
+                    else next.delete(index);
+                    return next;
+                  });
+                }}
+              >
                 <summary><b>OP{index + 1}</b><span>{ALGORITHMS[patch.algorithm].carriers.includes(index) ? "CARRIER" : "MODULATOR"}</span><em>{operator.ratio.toFixed(2)}×</em></summary>
                 <div className="operator-body">
                   <fieldset className="space-picker">

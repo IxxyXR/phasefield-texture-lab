@@ -29,13 +29,13 @@ const PRESET_STORAGE_KEY = "phasefield-4op-presets";
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 4;
 const PALETTES: Palette[] = [
   { name: "Ember", colors: ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"] },
-  { name: "Cobalt", colors: ["#07172d", "#164e8a", "#268bd2", "#7ac7ff", "#eef7ff"] },
-  { name: "Moss", colors: ["#101710", "#294f32", "#4f8a4f", "#a3c95f", "#f0f0cf"] },
-  { name: "Violet", colors: ["#130f24", "#3a205c", "#7b3f98", "#cf72c9", "#f8d9f1"] },
-  { name: "Ocean", colors: ["#061a1f", "#0b4f5c", "#168c8c", "#55c6b3", "#e2f4df"] },
-  { name: "Mono", colors: ["#101010", "#414141", "#7a7a7a", "#bdbdbd", "#f3f3f3"] },
+  { name: "Cobalt", colors: ["#101935", "#284b8c", "#00a6a6", "#f28f3b", "#f7e8a4"] },
+  { name: "Moss", colors: ["#14281d", "#355834", "#8c8a3c", "#cf6c4f", "#eee4b1"] },
+  { name: "Violet", colors: ["#1c1033", "#5a2a83", "#2f6fb0", "#d84a8b", "#f4d06f"] },
+  { name: "Ocean", colors: ["#082f3d", "#0a7c86", "#55c1d6", "#e76f51", "#f2d0a4"] },
+  { name: "Noir", colors: ["#16131a", "#3f4a5a", "#8a2846", "#d99b2b", "#efe6d0"] },
   { name: "Acid", colors: ["#15100f", "#4e1b62", "#d72f70", "#c9ef30", "#f7f6c5"] },
-  { name: "Clay", colors: ["#211713", "#6a382a", "#ad6846", "#d9a066", "#f0dfc2"] },
+  { name: "Clay", colors: ["#211713", "#8f3f36", "#2f8b83", "#d5a63c", "#f0dfc2"] },
 ];
 
 function packHexColor(hex: string) {

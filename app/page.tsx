@@ -24,7 +24,16 @@ const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
 const COLORS = ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"];
-const COLOR_VALUES = COLORS.map((hex) => Number.parseInt(hex.slice(1), 16));
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 4;
+const PACKED_COLORS = COLORS.map((hex) => {
+  const color = Number.parseInt(hex.slice(1), 16);
+  const red = (color >> 16) & 255;
+  const green = (color >> 8) & 255;
+  const blue = color & 255;
+  return LITTLE_ENDIAN
+    ? (red | (green << 8) | (blue << 16) | 0xff000000) >>> 0
+    : ((red << 24) | (green << 16) | (blue << 8) | 255) >>> 0;
+});
 const coordinateCache = new Map<number, Float64Array>();
 const polarCache = new Map<number, { radius?: Float32Array; angle?: Float32Array }>();
 const SPATIAL_NAMES = ["Linear", "Radial", "Angular", "Spiral"];
@@ -177,11 +186,12 @@ function clonePatch(patch: Patch): Patch {
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef(new Map<number, ImageData>());
+  const phaseFieldCacheRef = useRef<Array<{ key: string; field: Float64Array } | undefined>>([]);
   const workspaceRef = useRef<HTMLElement>(null);
   const draggingRef = useRef(false);
+  const motionPhaseRef = useRef(0);
   const [patch, setPatch] = useState(() => clonePatch(DEFAULT_PATCH));
   const [playing, setPlaying] = useState(false);
-  const [motionPhase, setMotionPhase] = useState(0);
   const [previewShare, setPreviewShare] = useState(56);
   const [resolution, setResolution] = useState(DEFAULT_RESOLUTION);
   const [interacting, setInteracting] = useState(false);
@@ -219,30 +229,53 @@ export default function Home() {
     const needsAngle = operatorState.some((operator) => operator.space === 2 || operator.space === 3);
     const polar = needsRadius || needsAngle ? polarCoordinatesFor(size, needsRadius, needsAngle) : null;
     const maximumRadius = Math.PI * Math.SQRT2;
-    const values = [0, 0, 0, 0];
+    const phaseFields = operatorState.map((operator, index) => {
+      const key = [
+        size,
+        patch.base,
+        operator.ratio,
+        operator.space,
+        operator.angle,
+        operator.radialBias,
+        operator.orientation,
+        operator.twist,
+      ].join(":");
+      const cached = phaseFieldCacheRef.current[index];
+      if (cached?.key === key) return cached.field;
 
-    for (let py = 0; py < size; py++) {
-      for (let px = 0; px < size; px++) {
-        const x = coordinates[px];
+      const field = new Float64Array(size * size);
+      for (let py = 0; py < size; py++) {
         const y = coordinates[py];
-        const pixelOffset = py * size + px;
-        const radius = needsRadius ? polar!.radius![pixelOffset] : 0;
-        const polarAngle = needsAngle ? polar!.angle![pixelOffset] : 0;
-
-        for (let index = 3; index >= 0; index--) {
-          const operator = operatorState[index];
+        for (let px = 0; px < size; px++) {
+          const x = coordinates[px];
+          const pixelOffset = py * size + px;
           let coordinate: number;
           if (operator.space === 1) {
-            coordinate = maximumRadius * Math.pow(radius / maximumRadius, operator.radialExponent);
+            coordinate = maximumRadius * Math.pow(polar!.radius![pixelOffset] / maximumRadius, operator.radialExponent);
           } else if (operator.space === 2) {
-            coordinate = polarAngle - operator.orientationOffset;
+            coordinate = polar!.angle![pixelOffset] - operator.orientationOffset;
           } else if (operator.space === 3) {
-            coordinate = radius + operator.twist * polarAngle;
+            coordinate = polar!.radius![pixelOffset] + operator.twist * polar!.angle![pixelOffset];
           } else {
             coordinate = x * operator.cos + y * operator.sin;
           }
-          const spatialPhase = patch.base * operator.ratio * coordinate;
-          const basePhase = spatialPhase + operator.phaseOffset + motionPhase * operator.ratio;
+          field[pixelOffset] = patch.base * operator.ratio * coordinate;
+        }
+      }
+      phaseFieldCacheRef.current[index] = { key, field };
+      return field;
+    });
+    const values = [0, 0, 0, 0];
+    const pixels = new Uint32Array(image.data.buffer, image.data.byteOffset, size * size);
+    const motionPhase = motionPhaseRef.current;
+
+    for (let py = 0; py < size; py++) {
+      for (let px = 0; px < size; px++) {
+        const pixelOffset = py * size + px;
+
+        for (let index = 3; index >= 0; index--) {
+          const operator = operatorState[index];
+          const basePhase = phaseFields[index][pixelOffset] + operator.phaseOffset + motionPhase * operator.ratio;
           let modulation = 0;
           const inputs = algorithm.inputs[index];
           for (let inputIndex = 0; inputIndex < inputs.length; inputIndex++) modulation += values[inputs[inputIndex]];
@@ -260,16 +293,14 @@ export default function Home() {
         for (let carrierIndex = 0; carrierIndex < algorithm.carriers.length; carrierIndex++) signal += values[algorithm.carriers[carrierIndex]];
         signal /= carrierLevel;
         const band = Math.max(0, Math.min(COLORS.length - 1, Math.floor(((signal + 1) / 2) * COLORS.length)));
-        const color = COLOR_VALUES[band];
-        const offset = pixelOffset * 4;
-        image.data[offset] = (color >> 16) & 255;
-        image.data[offset + 1] = (color >> 8) & 255;
-        image.data[offset + 2] = color & 255;
-        image.data[offset + 3] = 255;
+        pixels[pixelOffset] = PACKED_COLORS[band];
       }
     }
     context.putImageData(image, 0, 0);
-  }, [patch, motionPhase, renderSize]);
+  }, [patch, renderSize]);
+
+  const drawRef = useRef(draw);
+  useEffect(() => { drawRef.current = draw; }, [draw]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => draw());
@@ -280,7 +311,11 @@ export default function Home() {
     let frame = 0;
     let last = 0;
     const tick = (time: number) => {
-      if (time - last > 65) { setMotionPhase((phase) => phase + 0.035); last = time; }
+      if (time - last > 65) {
+        motionPhaseRef.current += 0.035;
+        drawRef.current();
+        last = time;
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);

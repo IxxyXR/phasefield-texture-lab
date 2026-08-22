@@ -183,6 +183,24 @@ function clonePatch(patch: Patch): Patch {
   return { ...patch, operators: patch.operators.map((operator) => ({ ...operator })) };
 }
 
+function LockToggle({ locked, label, onToggle }: { locked: boolean; label: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={locked ? "lock-toggle locked" : "lock-toggle"}
+      aria-pressed={locked}
+      aria-label={`${locked ? "Unlock" : "Lock"} ${label} during randomize`}
+      title={`${locked ? "Unlock" : "Lock"} ${label}`}
+      onClick={onToggle}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d={locked ? "M4.5 7V5a3.5 3.5 0 0 1 7 0v2" : "M4.5 7V5a3.5 3.5 0 0 1 6.7-1.4"} />
+        <rect x="3" y="7" width="10" height="7" rx="1" />
+      </svg>
+    </button>
+  );
+}
+
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef(new Map<number, ImageData>());
@@ -195,7 +213,17 @@ export default function Home() {
   const [previewShare, setPreviewShare] = useState(56);
   const [resolution, setResolution] = useState(DEFAULT_RESOLUTION);
   const [interacting, setInteracting] = useState(false);
+  const [locks, setLocks] = useState(() => new Set<string>());
   const renderSize = interacting ? Math.min(INTERACTIVE_RESOLUTION, resolution) : resolution;
+
+  const toggleLock = (id: string) => {
+    setLocks((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const draw = useCallback((size = renderSize) => {
     const canvas = canvasRef.current;
@@ -357,13 +385,12 @@ export default function Home() {
   const randomize = () => {
     const ratios = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7, 9.5, 11, 13, 15.75];
     const algorithmChoices = [0, 0, 1, 2, 2, 3, 4, 5, 6];
-    const algorithm = algorithmChoices[Math.floor(Math.random() * algorithmChoices.length)];
-    const directionRoot = Math.random() * 180;
-    setPatch({
-      base: MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, Math.random()),
-      algorithm,
-      feedback: Math.random() * 4.5,
-      operators: Array.from({ length: 4 }, (_, index) => {
+    setPatch((current) => {
+      const algorithm = locks.has("algorithm")
+        ? current.algorithm
+        : algorithmChoices[Math.floor(Math.random() * algorithmChoices.length)];
+      const directionRoot = Math.random() * 180;
+      const operators = current.operators.map((currentOperator, index) => {
         const operator = op(
           ratios[Math.floor(Math.random() * ratios.length)],
           ALGORITHMS[algorithm].carriers.includes(index) ? 0.75 + Math.random() * 0.65 : 1.5 + Math.random() * 4.5,
@@ -375,8 +402,17 @@ export default function Home() {
         operator.radialBias = Math.random() * 2 - 1;
         operator.orientation = Math.floor(Math.random() * 360);
         operator.twist = Math.random() * 8 - 4;
+        for (const key of Object.keys(operator) as Array<keyof Operator>) {
+          if (locks.has(`operator.${index}.${key}`)) operator[key] = currentOperator[key];
+        }
         return operator;
-      }),
+      });
+      return {
+        base: locks.has("base") ? current.base : MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, Math.random()),
+        algorithm,
+        feedback: locks.has("feedback") ? current.feedback : Math.random() * 4.5,
+        operators,
+      };
     });
   };
 
@@ -423,12 +459,24 @@ export default function Home() {
           onBlurCapture={(event) => { if (event.target instanceof HTMLInputElement && event.target.type === "range") setInteracting(false); }}
         >
           <section className="global-controls">
-            <label><span>Base frequency</span><output>{patch.base.toFixed(3)}</output><input type="range" min="0" max="100" step="0.25" value={baseToSlider(patch.base)} onChange={(event) => setPatch((current) => ({ ...current, base: sliderToBase(Number(event.target.value)) }))} /></label>
-            <label><span>OP4 feedback</span><output>{patch.feedback.toFixed(2)}</output><input type="range" min="0" max="6" step="0.1" value={patch.feedback} onChange={(event) => setPatch((current) => ({ ...current, feedback: Number(event.target.value) }))} /></label>
-            <label className="resolution-control"><span>Resolution</span><select value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>{RESOLUTIONS.map((size) => <option key={size} value={size}>{size} × {size}</option>)}</select></label>
+            <div className="control">
+              <div className="control-head"><span>Base frequency</span><output>{patch.base.toFixed(3)}</output><LockToggle locked={locks.has("base")} label="base frequency" onToggle={() => toggleLock("base")} /></div>
+              <input aria-label="Base frequency" type="range" min="0" max="100" step="0.25" value={baseToSlider(patch.base)} onChange={(event) => setPatch((current) => ({ ...current, base: sliderToBase(Number(event.target.value)) }))} />
+            </div>
+            <div className="control">
+              <div className="control-head"><span>OP4 feedback</span><output>{patch.feedback.toFixed(2)}</output><LockToggle locked={locks.has("feedback")} label="OP4 feedback" onToggle={() => toggleLock("feedback")} /></div>
+              <input aria-label="OP4 feedback" type="range" min="0" max="6" step="0.1" value={patch.feedback} onChange={(event) => setPatch((current) => ({ ...current, feedback: Number(event.target.value) }))} />
+            </div>
+            <div className="control resolution-control">
+              <div className="control-head"><span>Resolution</span><LockToggle locked={locks.has("resolution")} label="resolution" onToggle={() => toggleLock("resolution")} /></div>
+              <select aria-label="Resolution" value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>{RESOLUTIONS.map((size) => <option key={size} value={size}>{size} × {size}</option>)}</select>
+            </div>
           </section>
-          <div className="algorithm-grid" aria-label="FM routing algorithm">
-            {ALGORITHMS.map((algorithm, index) => <button key={algorithm.diagram} className={patch.algorithm === index ? "selected" : ""} onClick={() => setPatch((current) => ({ ...current, algorithm: index }))}><b>{index + 1}</b><span>{algorithm.diagram}</span></button>)}
+          <div className="algorithm-control">
+            <div className="control-group-head"><span>FM routing algorithm</span><LockToggle locked={locks.has("algorithm")} label="FM routing algorithm" onToggle={() => toggleLock("algorithm")} /></div>
+            <div className="algorithm-grid" aria-label="FM routing algorithm">
+              {ALGORITHMS.map((algorithm, index) => <button key={algorithm.diagram} className={patch.algorithm === index ? "selected" : ""} onClick={() => setPatch((current) => ({ ...current, algorithm: index }))}><b>{index + 1}</b><span>{algorithm.diagram}</span></button>)}
+            </div>
           </div>
           <div className="operators">
             {patch.operators.map((operator, index) => (
@@ -436,7 +484,7 @@ export default function Home() {
                 <summary><b>OP{index + 1}</b><span>{ALGORITHMS[patch.algorithm].carriers.includes(index) ? "CARRIER" : "MODULATOR"}</span><em>{operator.ratio.toFixed(2)}×</em></summary>
                 <div className="operator-body">
                   <fieldset className="space-picker">
-                    <legend>Spatial phase</legend>
+                    <legend><span>Spatial phase</span><LockToggle locked={locks.has(`operator.${index}.space`)} label={`OP${index + 1} spatial phase`} onToggle={() => toggleLock(`operator.${index}.space`)} /></legend>
                     <div className="space-grid">
                       {SPATIAL_NAMES.map((name, spaceIndex) => (
                         <button
@@ -451,15 +499,36 @@ export default function Home() {
                       ))}
                     </div>
                   </fieldset>
-                  <label><span>Ratio</span><output>{operator.ratio.toFixed(2)}</output><input type="range" min="0.25" max="16" step="0.25" value={operator.ratio} onChange={(event) => updateOperator(index, "ratio", Number(event.target.value))} /></label>
-                  <label><span>Level</span><output>{operator.level.toFixed(1)}</output><input type="range" min="0" max="8" step="0.1" value={operator.level} onChange={(event) => updateOperator(index, "level", Number(event.target.value))} /></label>
-                  {operator.space === 0 && <label><span>Direction</span><output>{operator.angle.toFixed(0)}°</output><input type="range" min="0" max="180" step="1" value={operator.angle} onChange={(event) => updateOperator(index, "angle", Number(event.target.value))} /></label>}
-                  {operator.space === 1 && <label><span>Bias</span><output>γ {Math.pow(2, operator.radialBias * 2).toFixed(2)}</output><input type="range" min="-1" max="1" step="0.01" value={operator.radialBias} onChange={(event) => updateOperator(index, "radialBias", Number(event.target.value))} /></label>}
-                  {operator.space === 2 && <label><span>Orientation</span><output>{operator.orientation.toFixed(0)}°</output><input type="range" min="0" max="360" step="1" value={operator.orientation} onChange={(event) => updateOperator(index, "orientation", Number(event.target.value))} /></label>}
-                  {operator.space === 3 && <label><span>Twist</span><output>{operator.twist.toFixed(2)}</output><input type="range" min="-4" max="4" step="0.05" value={operator.twist} onChange={(event) => updateOperator(index, "twist", Number(event.target.value))} /></label>}
-                  <label><span>Phase</span><output>{operator.phase.toFixed(0)}°</output><input type="range" min="0" max="360" step="1" value={operator.phase} onChange={(event) => updateOperator(index, "phase", Number(event.target.value))} /></label>
+                  <div className="control">
+                    <div className="control-head"><span>Ratio</span><output>{operator.ratio.toFixed(2)}</output><LockToggle locked={locks.has(`operator.${index}.ratio`)} label={`OP${index + 1} ratio`} onToggle={() => toggleLock(`operator.${index}.ratio`)} /></div>
+                    <input aria-label={`OP${index + 1} ratio`} type="range" min="0.25" max="16" step="0.25" value={operator.ratio} onChange={(event) => updateOperator(index, "ratio", Number(event.target.value))} />
+                  </div>
+                  <div className="control">
+                    <div className="control-head"><span>Level</span><output>{operator.level.toFixed(1)}</output><LockToggle locked={locks.has(`operator.${index}.level`)} label={`OP${index + 1} level`} onToggle={() => toggleLock(`operator.${index}.level`)} /></div>
+                    <input aria-label={`OP${index + 1} level`} type="range" min="0" max="8" step="0.1" value={operator.level} onChange={(event) => updateOperator(index, "level", Number(event.target.value))} />
+                  </div>
+                  {operator.space === 0 && <div className="control">
+                    <div className="control-head"><span>Direction</span><output>{operator.angle.toFixed(0)}°</output><LockToggle locked={locks.has(`operator.${index}.angle`)} label={`OP${index + 1} direction`} onToggle={() => toggleLock(`operator.${index}.angle`)} /></div>
+                    <input aria-label={`OP${index + 1} direction`} type="range" min="0" max="180" step="1" value={operator.angle} onChange={(event) => updateOperator(index, "angle", Number(event.target.value))} />
+                  </div>}
+                  {operator.space === 1 && <div className="control">
+                    <div className="control-head"><span>Bias</span><output>γ {Math.pow(2, operator.radialBias * 2).toFixed(2)}</output><LockToggle locked={locks.has(`operator.${index}.radialBias`)} label={`OP${index + 1} radial bias`} onToggle={() => toggleLock(`operator.${index}.radialBias`)} /></div>
+                    <input aria-label={`OP${index + 1} radial bias`} type="range" min="-1" max="1" step="0.01" value={operator.radialBias} onChange={(event) => updateOperator(index, "radialBias", Number(event.target.value))} />
+                  </div>}
+                  {operator.space === 2 && <div className="control">
+                    <div className="control-head"><span>Orientation</span><output>{operator.orientation.toFixed(0)}°</output><LockToggle locked={locks.has(`operator.${index}.orientation`)} label={`OP${index + 1} orientation`} onToggle={() => toggleLock(`operator.${index}.orientation`)} /></div>
+                    <input aria-label={`OP${index + 1} orientation`} type="range" min="0" max="360" step="1" value={operator.orientation} onChange={(event) => updateOperator(index, "orientation", Number(event.target.value))} />
+                  </div>}
+                  {operator.space === 3 && <div className="control">
+                    <div className="control-head"><span>Twist</span><output>{operator.twist.toFixed(2)}</output><LockToggle locked={locks.has(`operator.${index}.twist`)} label={`OP${index + 1} twist`} onToggle={() => toggleLock(`operator.${index}.twist`)} /></div>
+                    <input aria-label={`OP${index + 1} twist`} type="range" min="-4" max="4" step="0.05" value={operator.twist} onChange={(event) => updateOperator(index, "twist", Number(event.target.value))} />
+                  </div>}
+                  <div className="control">
+                    <div className="control-head"><span>Phase</span><output>{operator.phase.toFixed(0)}°</output><LockToggle locked={locks.has(`operator.${index}.phase`)} label={`OP${index + 1} phase`} onToggle={() => toggleLock(`operator.${index}.phase`)} /></div>
+                    <input aria-label={`OP${index + 1} phase`} type="range" min="0" max="360" step="1" value={operator.phase} onChange={(event) => updateOperator(index, "phase", Number(event.target.value))} />
+                  </div>
                   <fieldset className="wave-picker">
-                    <legend>Waveform · exact function</legend>
+                    <legend><span>Waveform · exact function</span><LockToggle locked={locks.has(`operator.${index}.wave`)} label={`OP${index + 1} waveform`} onToggle={() => toggleLock(`operator.${index}.wave`)} /></legend>
                     <div className="wave-grid">
                       {WAVE_NAMES.map((name, waveIndex) => (
                         <button

@@ -16,7 +16,7 @@ type Operator = {
   orientation: number;
   twist: number;
 };
-type Patch = { base: number; algorithm: number; feedback: number; palette: number; trueValues: boolean; operators: Operator[] };
+type Patch = { base: number; algorithm: number; feedback: number; animationSpeed: number; palette: number; trueValues: boolean; operators: Operator[] };
 type Algorithm = { diagram: string; inputs: number[][]; carriers: number[] };
 type SavedPreset = { name: string; patch: Patch };
 type Palette = { name: string; colors: string[] };
@@ -27,6 +27,8 @@ const INTERACTIVE_RESOLUTION = 256;
 const MIN_ANIMATION_FPS = 10;
 const RECOVERY_ANIMATION_FPS = 13;
 const ANIMATION_INTERVAL = 16;
+const MIN_ANIMATION_SPEED = 0.01;
+const MAX_ANIMATION_SPEED = 2;
 const TAU = Math.PI * 2;
 const MIN_BASE = 0.03;
 const MAX_BASE = 2;
@@ -109,6 +111,7 @@ const DEFAULT_PATCH: Patch = {
   base: 0.46,
   algorithm: 0,
   feedback: 0.8,
+  animationSpeed: 1,
   palette: 0,
   trueValues: false,
   operators: [op(1, 1, 0), op(3, 3.4, 88), op(7, 2.7, 37, 2), op(13, 2.1, 142)],
@@ -120,6 +123,14 @@ function baseToSlider(base: number) {
 
 function sliderToBase(position: number) {
   return MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, position / 100);
+}
+
+function animationSpeedToSlider(speed: number) {
+  return Math.log(speed / MIN_ANIMATION_SPEED) / Math.log(MAX_ANIMATION_SPEED / MIN_ANIMATION_SPEED) * 100;
+}
+
+function sliderToAnimationSpeed(position: number) {
+  return MIN_ANIMATION_SPEED * Math.pow(MAX_ANIMATION_SPEED / MIN_ANIMATION_SPEED, position / 100);
 }
 
 function coordinatesFor(size: number) {
@@ -214,7 +225,7 @@ function isSavedPreset(value: unknown): value is SavedPreset {
   if (!value || typeof value !== "object") return false;
   const preset = value as { name?: unknown; patch?: Partial<Patch> };
   if (typeof preset.name !== "string" || !preset.patch) return false;
-  if (typeof preset.patch.base !== "number" || typeof preset.patch.algorithm !== "number" || typeof preset.patch.feedback !== "number") return false;
+  if (typeof preset.patch.base !== "number" || typeof preset.patch.algorithm !== "number" || typeof preset.patch.feedback !== "number" || typeof preset.patch.animationSpeed !== "number") return false;
   if (typeof preset.patch.palette !== "number" || !Number.isInteger(preset.patch.palette) || preset.patch.palette < 0 || preset.patch.palette >= PALETTES.length || typeof preset.patch.trueValues !== "boolean") return false;
   if (!Array.isArray(preset.patch.operators) || preset.patch.operators.length !== 4) return false;
   const keys: Array<keyof Operator> = ["ratio", "level", "angle", "wave", "phase", "space", "radialBias", "orientation", "twist"];
@@ -441,7 +452,7 @@ export default function Home() {
     const tick = (time: number) => {
       if (time - last > ANIMATION_INTERVAL) {
         const animationElapsed = last ? Math.min(100, time - last) : ANIMATION_INTERVAL;
-        motionPhaseRef.current += animationElapsed * (0.035 / 65);
+        motionPhaseRef.current += animationElapsed * (0.035 / 65) * patch.animationSpeed;
         const renderResolution = interactingRef.current
           ? Math.min(INTERACTIVE_RESOLUTION, adaptiveResolutionRef.current)
           : adaptiveResolutionRef.current;
@@ -490,7 +501,7 @@ export default function Home() {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, resolution]);
+  }, [playing, resolution, patch.animationSpeed]);
   useEffect(() => {
     const finishInteraction = () => setInteracting(false);
     window.addEventListener("pointerup", finishInteraction);
@@ -561,6 +572,9 @@ export default function Home() {
         base: locks.has("base") ? current.base : MIN_BASE * Math.pow(MAX_BASE / MIN_BASE, Math.random()),
         algorithm,
         feedback: locks.has("feedback") ? current.feedback : Math.random() * 4.5,
+        animationSpeed: locks.has("animationSpeed")
+          ? current.animationSpeed
+          : 0.05 * Math.pow(1.25 / 0.05, Math.random()),
         palette: current.palette,
         trueValues: current.trueValues,
         operators,
@@ -647,6 +661,10 @@ export default function Home() {
             <div className="control">
               <div className="control-head"><span>OP4 feedback</span><output>{patch.feedback.toFixed(2)}</output><LockToggle locked={locks.has("feedback")} label="OP4 feedback" onToggle={() => toggleLock("feedback")} /></div>
               <input aria-label="OP4 feedback" type="range" min="0" max="6" step="0.1" value={patch.feedback} onChange={(event) => setPatch((current) => ({ ...current, feedback: Number(event.target.value) }))} />
+            </div>
+            <div className="control">
+              <div className="control-head"><span>Animation speed</span><output>{patch.animationSpeed.toFixed(2)}×</output><LockToggle locked={locks.has("animationSpeed")} label="animation speed" onToggle={() => toggleLock("animationSpeed")} /></div>
+              <input aria-label="Animation speed" type="range" min="0" max="100" step="0.25" value={animationSpeedToSlider(patch.animationSpeed)} onChange={(event) => setPatch((current) => ({ ...current, animationSpeed: sliderToAnimationSpeed(Number(event.target.value)) }))} />
             </div>
             <div className="control resolution-control">
               <div className="control-head"><span>Resolution</span><LockToggle locked={locks.has("resolution")} label="resolution" onToggle={() => toggleLock("resolution")} /></div>
@@ -789,7 +807,7 @@ export default function Home() {
           <div className="actions"><button className="primary" onClick={randomize}>Random patch</button><button onClick={() => setPlaying((value) => !value)}>{playing ? "Freeze" : "Animate"}</button><button onClick={download}>Save PNG</button></div>
         </aside>
       </section>
-      <footer><span>4 operators · 8 algorithms · 10 waveforms · 4 spatial modes · 8 palettes</span><span>No noise · no spatial warp · phase modulation only</span></footer>
+      <footer><span>4 operators · 8 algorithms · 10 waveforms · 4 spatial modes · 8 palettes</span></footer>
     </main>
   );
 }

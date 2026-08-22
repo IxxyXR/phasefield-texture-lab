@@ -29,13 +29,13 @@ const PRESET_STORAGE_KEY = "phasefield-4op-presets";
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([0x01020304]).buffer)[0] === 4;
 const PALETTES: Palette[] = [
   { name: "Ember", colors: ["#15121a", "#7d2449", "#ef4b23", "#f2b84b", "#eee9df"] },
-  { name: "Cobalt", colors: ["#101935", "#284b8c", "#00a6a6", "#f28f3b", "#f7e8a4"] },
-  { name: "Moss", colors: ["#14281d", "#355834", "#8c8a3c", "#cf6c4f", "#eee4b1"] },
-  { name: "Violet", colors: ["#1c1033", "#5a2a83", "#2f6fb0", "#d84a8b", "#f4d06f"] },
-  { name: "Ocean", colors: ["#082f3d", "#0a7c86", "#55c1d6", "#e76f51", "#f2d0a4"] },
-  { name: "Noir", colors: ["#16131a", "#3f4a5a", "#8a2846", "#d99b2b", "#efe6d0"] },
+  { name: "Arctic", colors: ["#eefaff", "#a8e0e8", "#3a91b8", "#ff5d73", "#16243a"] },
+  { name: "Sorbet", colors: ["#f6c7d5", "#ef9fbd", "#c7b6e8", "#9ed9d0", "#ffe59a"] },
+  { name: "Bauhaus", colors: ["#151515", "#df2935", "#f5c242", "#2468b4", "#f1eee5"] },
+  { name: "Desert", colors: ["#2b1812", "#8f3c2e", "#dd7b32", "#f0bc4f", "#218c84"] },
+  { name: "Mineral", colors: ["#25292a", "#53635d", "#8b8577", "#b08f82", "#776578"] },
   { name: "Acid", colors: ["#15100f", "#4e1b62", "#d72f70", "#c9ef30", "#f7f6c5"] },
-  { name: "Clay", colors: ["#211713", "#8f3f36", "#2f8b83", "#d5a63c", "#f0dfc2"] },
+  { name: "Noir", colors: ["#070709", "#17141b", "#2c2432", "#c3983f", "#f0eadb"] },
 ];
 
 function packHexColor(hex: string) {

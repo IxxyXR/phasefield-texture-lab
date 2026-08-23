@@ -259,6 +259,7 @@ export default function Home() {
   const workspaceRef = useRef<HTMLElement>(null);
   const draggingRef = useRef(false);
   const motionPhaseRef = useRef(0);
+  const randomizedOnLoadRef = useRef(false);
   const adaptiveResolutionRef = useRef(DEFAULT_RESOLUTION);
   const [patch, setPatch] = useState(() => clonePatch(DEFAULT_PATCH));
   const [playing, setPlaying] = useState(true);
@@ -564,12 +565,18 @@ export default function Home() {
         animationSpeed: locks.has("animationSpeed")
           ? current.animationSpeed
           : 0.05 * Math.pow(1.25 / 0.05, Math.random()),
-        palette: current.palette,
+        palette: locks.has("palette") ? current.palette : Math.floor(Math.random() * PALETTES.length),
         trueValues: current.trueValues,
         operators,
       };
     });
   };
+
+  useEffect(() => {
+    if (randomizedOnLoadRef.current) return;
+    randomizedOnLoadRef.current = true;
+    randomize();
+  }, []);
 
   const savePreset = () => {
     const name = presetName.trim() || `Preset ${presets.length + 1}`;
@@ -594,6 +601,51 @@ export default function Home() {
     setPresetStatus(`Loaded ${preset.name}`);
   };
 
+  const copyPreset = async () => {
+    const copiedPreset: SavedPreset = {
+      version: PRESET_SCHEMA_VERSION,
+      name: presetName.trim() || "Clipboard preset",
+      patch: clonePatch(patch),
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(copiedPreset, null, 2));
+      setPresetStatus("Copied current preset");
+    } catch {
+      setPresetStatus("Clipboard access unavailable");
+    }
+  };
+
+  const applyPastedPreset = (clipboardText: string, reportInvalid = true) => {
+    try {
+      const parsed = JSON.parse(clipboardText);
+      const candidate = parsed && typeof parsed === "object" && "patch" in parsed
+        ? parsed
+        : { name: "Pasted preset", patch: parsed };
+      const migrated = migrateSavedPreset(candidate, PRESET_MIGRATION_OPTIONS) as SavedPreset | null;
+      if (!migrated) throw new Error("Unusable preset");
+      setPatch(clonePatch(migrated.patch));
+      setPresetName(migrated.name);
+      setSelectedPreset("");
+      setPresetStatus(`Pasted ${migrated.name}`);
+      return true;
+    } catch {
+      if (reportInvalid) setPresetStatus("Clipboard does not contain a usable preset");
+      return false;
+    }
+  };
+
+  const pastePreset = async () => {
+    try {
+      const clipboardText = await Promise.race([
+        navigator.clipboard.readText(),
+        new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("Clipboard timeout")), 1000)),
+      ]);
+      applyPastedPreset(clipboardText);
+    } catch {
+      setPresetStatus("Clipboard blocked — press Ctrl/Cmd+V anywhere");
+    }
+  };
+
   const download = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -609,7 +661,9 @@ export default function Home() {
     : `${resolution}²`;
 
   return (
-    <main>
+    <main onPaste={(event) => {
+      if (applyPastedPreset(event.clipboardData.getData("text"), false)) event.preventDefault();
+    }}>
       <header><div className="brand"><span /> PHASEFIELD / 4OP</div><p>Four-operator spatial FM synthesizer</p></header>
       <section ref={workspaceRef} className="workspace" style={{ "--preview-share": `${previewShare}%` } as CSSProperties}>
         <div className="visual-panel">
@@ -691,6 +745,10 @@ export default function Home() {
               {presets.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
             </select>
             <button type="button" disabled={!selectedPreset} onClick={loadPreset}>Load preset</button>
+            <div className="clipboard-controls">
+              <button type="button" onClick={copyPreset}>Copy current preset</button>
+              <button type="button" onClick={pastePreset}>Paste preset</button>
+            </div>
             <span className="preset-status" role="status">{presetStatus}</span>
           </section>
           <div className="algorithm-control">

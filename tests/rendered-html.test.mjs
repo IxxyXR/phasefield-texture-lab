@@ -18,10 +18,13 @@ test("renders the public four-operator FM interface", async () => {
   assert.match(html, /base · ratio · r \+ turns · atan2\(y, x\)/);
   assert.match(html, /Lock base frequency during randomize/);
   assert.match(html, /Lock animation speed during randomize/);
+  assert.match(html, /Lock color palette during randomize/);
   assert.match(html, /Animation speed/);
   assert.match(html, /Lock OP1 waveform during randomize/);
   assert.match(html, /Save preset/);
   assert.match(html, /Load preset/);
+  assert.match(html, /Copy current preset/);
+  assert.match(html, /Paste preset/);
   assert.equal((html.match(/<details open=""/g) ?? []).length, 4);
   assert.equal((html.match(/Color palette [A-Z][a-z]+/g) ?? []).length, 8);
   assert.match(html, /True values continuous grayscale/);

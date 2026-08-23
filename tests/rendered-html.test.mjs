@@ -25,6 +25,8 @@ test("renders the public four-operator FM interface", async () => {
   assert.equal((html.match(/<details open=""/g) ?? []).length, 4);
   assert.equal((html.match(/Color palette [A-Z][a-z]+/g) ?? []).length, 8);
   assert.match(html, /True values continuous grayscale/);
+  assert.match(html, /RUNNING/);
+  assert.match(html, />Freeze</);
   assert.match(html, /<option value="2048">/);
   assert.match(html, /<option value="4096">/);
   assert.doesNotMatch(html, /Cascade|Alloy|Lattice|Split/);

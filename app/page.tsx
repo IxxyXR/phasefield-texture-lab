@@ -261,7 +261,7 @@ export default function Home() {
   const motionPhaseRef = useRef(0);
   const adaptiveResolutionRef = useRef(DEFAULT_RESOLUTION);
   const [patch, setPatch] = useState(() => clonePatch(DEFAULT_PATCH));
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlaying] = useState(true);
   const [previewShare, setPreviewShare] = useState(56);
   const [resolution, setResolution] = useState(DEFAULT_RESOLUTION);
   const [adaptiveResolution, setAdaptiveResolution] = useState(DEFAULT_RESOLUTION);
